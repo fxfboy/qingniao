@@ -1,6 +1,6 @@
 [package]
 name = "qingniao"
-version = "0.2.0"
+version = "0.3.0"
 description = "青鸟 · 飞书消息助手 — 向飞书自定义机器人发送各种格式消息"
 authors = ["fuxinf"]
 edition = "2021"
