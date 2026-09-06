@@ -1,19 +1,57 @@
-name: Build 青鸟
+name: Release 青鸟
 
 on:
-  workflow_dispatch:
   push:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        # macOS 与 Windows 双平台构建
-        platform: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.platform }}
+  # 校验 tag 版本与应用版本一致，避免 tauri-action 用 __VERSION__ 建出意外 tag
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 校验 tag 与 Cargo.toml 版本一致
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          echo "tag=${GITHUB_REF_NAME} cargo=${CARGO_VERSION}"
+          if [ -z "$CARGO_VERSION" ]; then
+            echo "::error::无法从 src-tauri/Cargo.toml 读取版本"
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::tag 版本(${TAG_VERSION})与 Cargo.toml 版本(${CARGO_VERSION})不一致，请先更新版本再打 tag"
+            exit 1
+          fi
+          echo "version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
+
+  # 先创建 Draft Release，后续 macOS / Windows job 并行向同一 release 上传产物
+  create-release:
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: 创建（或复用）Draft Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "青鸟 ${{ needs.check-version.outputs.version }}" \
+            --notes "青鸟 · 飞书消息助手 — 向飞书自定义机器人发送文本 / 富文本 / 图片 / 消息卡片"
+
+  # macOS：Apple Silicon (arm64)，只打 dmg，tauri-action 自动上传
+  build-macos:
+    needs: create-release
+    runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,22 +69,56 @@ jobs:
         with:
           workspaces: "./src-tauri"
 
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
       - name: Install npm dependencies
         run: npm install
 
-      - name: Build & Release
+      - name: Build & Upload DMG
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: "青鸟 v__VERSION__"
+          tagName: ${{ github.ref_name }}
+          releaseName: "青鸟 ${{ needs.check-version.outputs.version }}"
           releaseBody: "青鸟 · 飞书消息助手 — 向飞书自定义机器人发送文本 / 富文本 / 图片 / 消息卡片"
           releaseDraft: true
           prerelease: false
+          args: --target aarch64-apple-darwin --bundles dmg
+
+  # Windows：不打包安装程序（不要 msi），只出便携 zip
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri"
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: 构建 exe（跳过 msi / nsis）
+        run: npm run tauri build -- --no-bundle
+
+      - name: 打包为 zip
+        shell: pwsh
+        run: |
+          $zipName = "QingNiao_${{ needs.check-version.outputs.version }}_windows-x64.zip"
+          Compress-Archive -Path src-tauri\target\release\qingniao.exe -DestinationPath $zipName
+          Get-Item $zipName | Select-Object Name, Length
+
+      - name: 上传 zip 到 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "QingNiao_${{ needs.check-version.outputs.version }}_windows-x64.zip" --clobber
