@@ -96,6 +96,24 @@ impl TransferSnapshot {
     }
 }
 
+/// 权威状态持有者：真实服务与阶段 A 替身共用同一状态源（§5.2 唯一推送点的存储）
+pub struct StatusCell(Mutex<LocalServiceStatus>);
+
+impl StatusCell {
+    pub fn new(status: LocalServiceStatus) -> Self {
+        Self(Mutex::new(status))
+    }
+    pub fn set(&self, status: LocalServiceStatus) {
+        *self.0.lock().unwrap() = status;
+    }
+}
+
+impl ServiceStatusProvider for StatusCell {
+    fn snapshot(&self) -> LocalServiceStatus {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 /// 只读：服务状态（§9.6）
 pub trait ServiceStatusProvider: Send + Sync + 'static {
     fn snapshot(&self) -> LocalServiceStatus;
@@ -264,21 +282,51 @@ impl WindowRouteSink for FakeRouteSink {
     }
 }
 
-/// 阶段 A 的服务与传输替身集合，放进 `AppState` 供菜单与退出协议使用
+/// 服务与传输的集合，放进 `AppState` 供菜单与退出协议使用。
+/// 阶段 B（文件传输）以真实实现替换 fake：状态源为 [`StatusCell`]，
+/// 控制器为 `local_server::RealLocalService`，传输活动为引擎适配器。
 pub struct PhaseAService {
-    pub service: Arc<FakeLocalService>,
-    pub transfer: Arc<FakeTransfer>,
+    /// 权威状态源（menu_label 文案的依据）
+    pub status: Arc<StatusCell>,
+    /// 副作用：listener 生命周期（stop/restart/stop_accepting）
+    pub service: Arc<dyn LocalServiceController>,
+    /// 只读：传输活动快照
+    pub transfer: Arc<dyn TransferActivityProvider>,
+    /// 副作用：drain 与安全点
+    pub transfer_ctrl: Arc<dyn TransferController>,
     pub route_sink: Arc<FakeRouteSink>,
 }
 
 impl PhaseAService {
-    /// 默认替身：服务处于「运行中（默认端口）」，无进行中任务
+    /// 阶段 A 替身集合（单测/降级用）：服务处于「运行中（默认端口）」，无进行中任务
     pub fn new() -> Self {
+        let fake = Arc::new(FakeLocalService::new(LocalServiceStatus::Running {
+            bound_port: DEFAULT_LOCAL_PORT,
+        }));
+        let fake_transfer = Arc::new(FakeTransfer::default());
         Self {
-            service: Arc::new(FakeLocalService::new(LocalServiceStatus::Running {
+            status: Arc::new(StatusCell::new(LocalServiceStatus::Running {
                 bound_port: DEFAULT_LOCAL_PORT,
             })),
-            transfer: Arc::new(FakeTransfer::default()),
+            service: fake,
+            transfer: fake_transfer.clone(),
+            transfer_ctrl: fake_transfer,
+            route_sink: Arc::new(FakeRouteSink::default()),
+        }
+    }
+
+    /// 真实装配（setup 时调用）
+    pub fn with_parts(
+        status: Arc<StatusCell>,
+        service: Arc<dyn LocalServiceController>,
+        transfer: Arc<dyn TransferActivityProvider>,
+        transfer_ctrl: Arc<dyn TransferController>,
+    ) -> Self {
+        Self {
+            status,
+            service,
+            transfer,
+            transfer_ctrl,
             route_sink: Arc::new(FakeRouteSink::default()),
         }
     }

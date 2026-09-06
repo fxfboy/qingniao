@@ -31,6 +31,21 @@ base64 = "0.22"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 # std + alloc：`log::set_boxed_logger` 需要 alloc feature（0.4.34 默认特性不含它）
 log = { version = "0.4", features = ["std", "alloc"] }
+# ===== 文件传输依赖基线（D22，docs/文件传输功能设计文档.md §11.1）=====
+# K / app_secret 存 OS 凭据库（macOS Keychain / Windows Credential Manager）
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+# payload 信封与分片 AEAD（AES-256-GCM）
+aes-gcm = "0.10"
+# 文件/payload 指纹、kid
+sha2 = "0.10"
+# webhook HMAC-SHA256 签名（从 main.js 下沉到后端）
+hmac = "0.12"
+# 127.0.0.1 双路由 loopback 服务（D14；与 dock-tray 阶段 B 真实 listener 同一实现）
+tiny_http = "0.12"
+# K/DEK/nonce/handle 的 CSPRNG
+rand = "0.8"
+# 文件名 Unicode NFC 规范化（P2-3）
+unicode-normalization = "0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # 仅用于恢复 Dock 图标：切回 Regular 后系统会丢失应用图标（见 tray.rs restore_dock_icon）。

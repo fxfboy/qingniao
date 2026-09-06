@@ -1,17 +1,17 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>青鸟 · 飞书消息助手</title>
-  <link rel="stylesheet" href="styles.css" />
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>青鸟 · 飞书消息助手</title>
+<link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 <div class="app" data-od-id="app-shell">
 
   <header class="appbar" data-od-id="appbar">
     <div class="logo" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/>
       </svg>
     </div>
@@ -20,32 +20,19 @@
       <p>蓬山此去无多路，青鸟殷勤为探看</p>
     </div>
     <div class="spacer"></div>
+
+    <!-- 发送目标下拉 -->
     <div class="bot-picker-wrap">
-      <button class="bot-picker" id="botPickerBtn" data-od-id="bot-picker" aria-label="选择发送目标" aria-haspopup="menu">
+      <button class="bot-picker" id="botPickerBtn" data-od-id="bot-picker" aria-label="选择发送目标" aria-haspopup="menu" aria-expanded="false">
         <span class="dot" aria-hidden="true"></span>
-        <b id="currentBotName">TK</b>
-        <span style="color:var(--muted-2); font-size:12px" id="currentBotHint">已设置签名</span>
-        <span class="caret">
+        <b id="currentBotName">未设置</b>
+        <span style="color:var(--muted); font-size:12px" id="currentBotHint"></span>
+        <span class="caret" aria-hidden="true">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
         </span>
       </button>
       <div class="bot-menu" id="botMenu" role="menu" aria-label="发送目标">
-        <div class="bot-menu-title">发送目标 · 3 个机器人</div>
-        <button class="bot-item active" data-name="TK" data-hint="已设置签名" role="menuitemradio" aria-checked="true">
-          <span class="bdot" aria-hidden="true"></span>
-          <div class="binfo"><b>TK</b><span>open.feishu.cn/…/12d180a3-f4b2</span></div>
-          <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-        </button>
-        <button class="bot-item" data-name="产品团队" data-hint="已设置签名" role="menuitemradio" aria-checked="false">
-          <span class="bdot" aria-hidden="true"></span>
-          <div class="binfo"><b>产品团队</b><span>open.feishu.cn/…/f9a2b1c7-88ee</span></div>
-          <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-        </button>
-        <button class="bot-item" data-name="Ops 告警" data-hint="未设置签名" role="menuitemradio" aria-checked="false">
-          <span class="bdot muted" aria-hidden="true"></span>
-          <div class="binfo"><b>Ops 告警</b><span>open.feishu.cn/…/3ce880d1-7a2f</span></div>
-          <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-        </button>
+        <div class="bot-menu-title">发送目标</div>
         <div class="bot-menu-divider"></div>
         <button class="bot-menu-action" id="menuGoManage">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -54,193 +41,229 @@
         </button>
       </div>
     </div>
-    <button class="btn-ghost" id="openManage" data-od-id="manage-btn" title="管理群机器人 · Webhook 列表">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      机器人
-    </button>
+
     <button class="btn-ghost btn-icon" data-od-id="config-btn" id="openConfig" title="应用配置 · 凭证与偏好" aria-label="配置">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
   </header>
 
-  <main class="grid" data-od-id="main">
-
-    <section class="composer" data-od-id="composer-card">
-
-      <!-- 附件条：粘贴/上传后出现 -->
-      <div class="attachments" data-od-id="attachments" id="attachments">
-        <div class="att" style="background-image:linear-gradient(135deg, oklch(0.85 0.08 200), oklch(0.7 0.11 260))">
-          <span class="badge">screenshot.png</span>
-          <span class="state"><span class="sd"></span>img_ecffc3b9…</span>
-          <button class="rm" aria-label="移除附件">×</button>
-        </div>
-        <div class="att uploading" style="background-image:linear-gradient(135deg, oklch(0.9 0.07 90), oklch(0.75 0.12 30))">
-          <span class="badge">chart-q3.jpg</span>
-          <span class="state"><span class="sd"></span>上传中 62%</span>
-          <button class="rm" aria-label="移除附件">×</button>
-        </div>
-        <button class="att-add" aria-label="添加附件">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
+  <!-- 消息区：发送历史与文件传输在同一条流里 -->
+  <section class="chat" data-od-id="chat-panel">
+    <div class="chat-head" data-od-id="chat-head">
+      <div class="cn">
+        <b id="convName">消息记录</b>
+        <span class="sep">·</span>
+        <span>发出与取回</span>
       </div>
-
-      <!-- 编辑器主区 -->
-      <div class="editor-wrap">
-        <div class="hint">
-          输入 <kbd>/</kbd> 插入卡片元素 · 直接粘贴图片 · 支持 Markdown
-        </div>
-        <textarea class="editor" id="editor" data-od-id="editor" spellcheck="false" placeholder="写点什么，或直接粘贴图片…&#10;&#10;支持 Markdown 语法（**粗体**、[链接](https://…)、# 标题、> 引用、- 列表、`代码`）；&#10;需要 @ 某人：@所有人 或 <at user_id=&quot;ou_xxx&quot;>名字</at>"></textarea>
-
-        <!-- Slash 命令菜单（原型：默认不显示） -->
-        <div class="slash-menu" id="slashMenu">
-          <div class="row active">
-            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg></div>
-            <div class="txt"><b>标题栏</b><span>为消息增加彩色标题</span></div>
-            <kbd>H</kbd>
+      <div class="spacer"></div>
+      <div class="chat-stat" id="chatStat" aria-live="polite">
+        <span class="s up"><i></i><span id="statUp">发出 0</span></span>
+        <span class="s down"><i></i><span id="statDown">接收 0</span></span>
+      </div>
+      <div class="pop-wrap">
+        <button class="chat-act" id="retrieveBtn" data-od-id="retrieve-btn" aria-expanded="false" aria-controls="retrievePop" title="粘贴群里的取回链接">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/><path d="M4 3h16"/></svg>
+          取回文件
+        </button>
+        <div class="popover" id="retrievePop" role="dialog" aria-label="取回文件">
+          <label for="retrieveInput">下载链接或加密载荷</label>
+          <div class="prow">
+            <input type="text" id="retrieveInput" spellcheck="false" placeholder="http://127.0.0.1:9876/dl?t=…" />
+            <button class="pgo" id="retrieveGo">解析</button>
           </div>
-          <div class="row">
-            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="2"/></svg></div>
-            <div class="txt"><b>按钮组</b><span>插入可点击的操作按钮</span></div>
-            <kbd>B</kbd>
-          </div>
-          <div class="row">
-            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M12 3v18"/></svg></div>
-            <div class="txt"><b>分栏布局</b><span>并排展示多列内容</span></div>
-            <kbd>C</kbd>
-          </div>
+          <p class="phint" id="retrieveHint">群消息里的链接点不开时，把整条链接粘进来一样能取回文件。解析后会作为一条记录出现在下方。</p>
         </div>
       </div>
+      <button class="chat-act danger" id="clearBtn" data-od-id="clear-history" title="清空消息记录">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+        清空记录
+      </button>
+    </div>
 
-      <!-- 编辑器工具栏 -->
-      <div class="toolbar" data-od-id="toolbar">
-        <button class="tool" title="加粗 ⌘B">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 4h7a4 4 0 0 1 0 8H6zM6 12h8a4 4 0 0 1 0 8H6z"/></svg>
-        </button>
-        <button class="tool" title="斜体 ⌘I">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>
-        </button>
-        <button class="tool" title="标题">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16M18 4v16M6 12h12"/></svg>
-        </button>
-        <button class="tool" title="列表">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
-        </button>
-        <span class="sep"></span>
-        <button class="tool" title="插入链接">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        </button>
-        <button class="tool" title="插入代码">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-        </button>
-        <button class="tool" title="上传图片">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        </button>
-        <span class="sep"></span>
-        <button class="tool" title="@ 提及">
-          <span style="font-size:14px;font-weight:600">@</span>
-          <span>提及</span>
-        </button>
-        <button class="tool" title="斜杠菜单">
-          <span style="font-family:var(--font-mono);font-size:13px;font-weight:600">/</span>
-          <span>元素</span>
-        </button>
+    <div class="chat-scroll" id="chatScroll" data-od-id="message-stream">
+      <div id="stream"></div>
 
-        <div class="right">
-          <div class="mode" role="tablist" aria-label="视图切换">
-            <button class="active" role="tab" aria-selected="true">编辑</button>
-            <button role="tab" aria-selected="false">预览</button>
-          </div>
-          <span id="counter">248 字</span>
+      <div class="chat-empty" id="chatEmpty" data-od-id="chat-empty">
+        <div class="ce-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.4-.6L3 21l1.7-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg>
         </div>
+        <b>还没有任何记录</b>
+        <p>发出的消息、图片和文件，以及从群里取回的文件，都会按时间出现在这里。</p>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <aside class="history" data-od-id="history-panel">
-      <header>
-        <h3>发送历史</h3>
-        <button>清空</button>
-      </header>
-      <ul>
-        <li class="ok">
-          <span class="rail"></span>
-          <div>
-            <div class="head"><span class="time">今天 15:53</span><span class="kind post">富文本</span></div>
-            <div class="preview">Q3 季度报告已发布 · 关键结论 + 完整报告链接 · @所有人</div>
-            <div class="status">✓ 已发送 · 200 OK · 12 ms</div>
-          </div>
-        </li>
-        <li class="ok">
-          <span class="rail"></span>
-          <div>
-            <div class="head"><span class="time">今天 14:22</span><span class="kind image">图片</span></div>
-            <div class="preview">screenshot-dashboard.png (含 2 张附件)</div>
-            <div class="status">✓ 已发送 · 200 OK</div>
-          </div>
-        </li>
-        <li class="ok">
-          <span class="rail"></span>
-          <div>
-            <div class="head"><span class="time">昨天 18:07</span><span class="kind card">交互卡片</span></div>
-            <div class="preview">发布审批通知 · 3 个操作按钮：批准 / 打回 / 稍后处理</div>
-            <div class="status">✓ 已发送 · 200 OK</div>
-          </div>
-        </li>
-        <li class="err">
-          <span class="rail"></span>
-          <div>
-            <div class="head"><span class="time">昨天 11:33</span><span class="kind">文本</span></div>
-            <div class="preview">15 环境部署完成，请协助验证订单流程…</div>
-            <div class="status">✗ 413 Payload Too Large · 已改为分段重发</div>
-          </div>
-        </li>
-        <li class="ok">
-          <span class="rail"></span>
-          <div>
-            <div class="head"><span class="time">周三 10:14</span><span class="kind post">富文本</span></div>
-            <div class="preview">周会纪要 - 增长 / 交付 / 运营三个方向的下周计划</div>
-            <div class="status">✓ 已发送 · 200 OK</div>
-          </div>
-        </li>
-      </ul>
-    </aside>
-  </main>
+  <!-- 输入区：默认一行，与发送按钮整合在同一行 -->
+  <section class="composer" data-od-id="composer">
+    <div class="composer-shell">
+      <div class="ed is-empty" id="editor" data-od-id="editor" contenteditable="true" role="textbox"
+           aria-multiline="true" aria-label="发送给目标机器人" data-ph="输入消息，或拖入文件…" spellcheck="false"></div>
 
-  <footer class="footer" data-od-id="footer">
-    <button class="send" data-od-id="send-btn">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-      发送
-      <kbd>⌘↵</kbd>
-    </button>
-
-    <div class="intent" data-od-id="intent-bar">
-      <span class="marker" aria-hidden="true"></span>
-      <span class="type-pill post" id="typePill">富文本</span>
-      <span class="why" id="whyText">检测到 <b>Markdown 链接、加粗、@ 提及</b>，纯文本无法完整呈现</span>
-      <div class="override">
-        <span style="margin-right:6px">按类型：</span>
-        <div class="seg" role="tablist" aria-label="强制消息类型">
-          <button role="tab" aria-selected="false" data-type="auto">自动</button>
-          <button role="tab" aria-selected="true" class="active" data-type="post">富文本</button>
-          <button role="tab" aria-selected="false" data-type="text">纯文本</button>
-          <button role="tab" aria-selected="false" data-type="interactive">交互卡片</button>
+      <div class="ctools">
+        <button class="cbtn t-emoji" id="btnEmoji" title="表情" aria-label="表情">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5v.01M15 9.5v.01"/></svg>
+        </button>
+        <button class="cbtn t-at" id="btnAt" title="@ 提及" aria-label="@ 提及"><span class="cletter">@</span></button>
+        <div class="add-wrap">
+          <button class="cbtn" id="btnAdd" aria-expanded="false" aria-haspopup="menu" aria-controls="addMenu" title="添加图片或文件" aria-label="添加图片或文件">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <div class="add-menu" id="addMenu" role="menu" aria-label="添加">
+            <div class="am-title">添加</div>
+            <button class="am-item" id="addImage" role="menuitem">
+              <span class="am-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-4.5-4.5L6 21"/></svg>
+              </span>
+              <span class="am-tx"><b>图片</b><span>所见即所得地插到光标处，随消息一起发出</span></span>
+            </button>
+            <button class="am-item" id="addFile" role="menuitem">
+              <span class="am-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-5"/><path d="M9.6 15.2L12 12.8l2.4 2.4"/></svg>
+              </span>
+              <span class="am-tx"><b>本地文件</b><span>加密后单独发一条记录，群里出现取回链接</span></span>
+            </button>
+          </div>
         </div>
+        <button class="cbtn" id="btnExpand" title="放大输入框" aria-label="放大输入框">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        </button>
+        <button class="csend" id="btnSend" data-od-id="send-btn" aria-disabled="true" title="发送 · ↵" aria-label="发送">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
       </div>
     </div>
 
-    <div class="result ok" data-od-id="result-toast">
-      <span class="dot"></span>
-      <span>上次发送 <b style="color:var(--fg);font-weight:500">成功</b></span>
-      <code>200 OK · 12ms</code>
+    <div class="composer-foot" data-od-id="intent-bar">
+      <div class="detect">
+        <span class="marker" aria-hidden="true"></span>
+        <span class="dpill" id="typePill">文本</span>
+        <span class="why" id="whyText">编辑器为空 · 输入内容后会自动判断消息类型</span>
+      </div>
+      <div class="right">
+        <span class="cnt" id="counter"></span>
+        <span class="kbd-send"><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+      </div>
     </div>
-  </footer>
+  </section>
 </div>
 
-<!-- ==== 配置 Modal ==== -->
+<!-- 放大编辑：点击输入框内的 ↗ 展开至接近全屏 -->
+<div class="expand" id="expand" data-od-id="expand-editor" role="dialog" aria-modal="true" aria-label="放大编辑">
+  <div class="expand-sheet">
+    <div class="expand-bar">
+      <button class="ebtn" data-md="bold" title="加粗" aria-label="加粗" style="font-weight:700">B</button>
+      <button class="ebtn" data-md="strike" title="删除线" aria-label="删除线" style="text-decoration:line-through">S</button>
+      <button class="ebtn" data-md="italic" title="斜体" aria-label="斜体" style="font-style:italic">I</button>
+      <span class="ebar-sep"></span>
+      <button class="ebtn" data-md="ul" title="无序列表" aria-label="无序列表">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg>
+      </button>
+      <button class="ebtn" data-md="ol" title="有序列表" aria-label="有序列表">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/><path d="M4 6h1v4M3.6 10h2.8"/></svg>
+      </button>
+      <span class="ebar-sep"></span>
+      <button class="ebtn" data-md="quote" title="引用" aria-label="引用">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 5v14"/><path d="M12 7c2 0 3.5 1.2 4 3-1 .2-2 .8-2.4 2"/><path d="M12 17h6"/></svg>
+      </button>
+      <button class="ebtn" data-md="code" title="代码" aria-label="代码">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      </button>
+      <button class="ebtn" data-md="link" title="插入链接" aria-label="插入链接">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </button>
+      <div class="ebar-right">
+        <span class="etip">↵ 直接发送</span>
+        <button class="ebtn" id="expandClose" title="收起" aria-label="收起">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="expand-head">
+      <input class="expand-title" id="expandTitle" placeholder="无标题" aria-label="标题" />
+    </div>
+
+    <div class="expand-ed is-empty" id="expandEd" role="textbox" aria-multiline="true" aria-label="消息内容"
+         data-ph="写点什么，或者把图片直接粘进来…" spellcheck="false"></div>
+
+    <div class="expand-foot">
+      <button class="cbtn" id="expandAddImage" title="插入图片" aria-label="插入图片">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-4.5-4.5L6 21"/></svg>
+      </button>
+      <button class="cbtn" id="expandAddFile" title="发送本地文件" aria-label="发送本地文件">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-5"/><path d="M9.6 15.2L12 12.8l2.4 2.4"/></svg>
+      </button>
+      <span class="ebar-sep"></span>
+      <span style="font-size:11.5px;color:var(--muted)" id="expandFrom">来自输入框的内容 · 收起时会带回去</span>
+      <div class="ef-hint">
+        <span id="expandCount">0 字</span>
+        <span><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+      </div>
+      <button class="csend" id="expandSend" aria-disabled="true" title="发送 · ↵" aria-label="发送">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="imgPicker" accept="image/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" tabindex="-1" aria-hidden="true" />
+
+<!-- 拖拽接收遮罩 -->
+<div class="dropzone" id="dropzone" aria-hidden="true">
+  <div class="dz-card">
+    <div class="dz-ico">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+    </div>
+    <b>松手即开始传输</b>
+    <span>文件在本机加密后上传，群里只出现一条取回链接<br />单文件不超过 100 MB</span>
+  </div>
+</div>
+
+<!-- 发送文件确认 -->
+<div class="overlay" id="confirmOverlay" data-od-id="send-file-overlay" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="modal tiny" role="document">
+    <header>
+      <div class="m-title">
+        <h2 id="confirmTitle">发送给 <span id="confirmTarget">-</span></h2>
+      </div>
+      <button class="close" id="confirmClose" aria-label="关闭">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="confirm-body">
+      <div class="confirm-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>无法添加该类型的内容到输入框，将单独发送。</span>
+      </div>
+      <div class="confirm-file">
+        <span class="cico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" id="confirmIconShape"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+        </span>
+        <span class="cinfo">
+          <b id="confirmName"></b>
+          <span id="confirmMeta"></span>
+        </span>
+      </div>
+      <div class="e2e-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <span>端到端加密：文件在这台机器上加密后才上传，群里出现的是一条取回链接，链接 30 分钟内有效。</span>
+      </div>
+    </div>
+    <footer>
+      <div class="left">单文件不超过 100 MB</div>
+      <div class="spacer"></div>
+      <button class="btn-secondary" id="confirmCancel">取消</button>
+      <button class="btn-primary" id="confirmSend">发送</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 配置 Modal -->
 <div class="overlay" id="configOverlay" data-od-id="config-overlay" role="dialog" aria-modal="true" aria-labelledby="configTitle">
   <div class="modal" role="document">
     <header>
       <div class="m-title">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         <h2 id="configTitle">配置</h2>
       </div>
       <button class="close" id="closeConfig" aria-label="关闭">
@@ -254,6 +277,16 @@
         <button class="active" data-tab="app">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 9h6v6H9z"/></svg>
           飞书应用
+        </button>
+        <div class="group-title">集成</div>
+        <button data-tab="agent">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Agent
+        </button>
+        <div class="group-title">传输</div>
+        <button data-tab="transfer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4"/><path d="M3.5 7.5L7 4l3.5 3.5"/><path d="M17 8v12"/><path d="M20.5 16.5L17 20l-3.5-3.5"/></svg>
+          文件传输
         </button>
         <div class="group-title">通用</div>
         <button data-tab="pref">
@@ -270,60 +303,47 @@
         <h3>飞书应用凭证</h3>
         <p class="desc">
           飞书群机器人（Webhook）本身无法上传图片。青鸟需要借助一个自建的<b style="color:var(--fg);font-weight:500">飞书应用</b>去调用
-          <code style="font-family:var(--font-mono);font-size:11.5px;background:var(--surface-soft);padding:1px 5px;border-radius:4px">POST /open-apis/im/v1/images</code>
-          换取 <code style="font-family:var(--font-mono);font-size:11.5px;background:var(--surface-soft);padding:1px 5px;border-radius:4px">image_key</code>，再由群机器人发出。凭证只保存在本地。
+          <code>POST /open-apis/im/v1/images</code> 换取 <code>image_key</code>，再由群机器人发出。凭证只保存在本地。
         </p>
-
         <div class="field">
-          <div class="field-head">
-            <b>App ID</b><span class="req">*</span>
-          </div>
+          <div class="field-head"><b>App ID</b><span class="req">*</span></div>
           <input type="text" id="appIdInput" value="" spellcheck="false" />
           <div class="field-hint">在飞书开放平台 · 「凭证与基础信息」中获取，形如 <code>cli_xxxxxxxx</code></div>
         </div>
-
         <div class="field">
-          <div class="field-head">
-            <b>App Secret</b><span class="req">*</span>
-            <button class="toggle" id="toggleSecret">显示</button>
-          </div>
+          <div class="field-head"><b>App Secret</b><span class="req">*</span><button class="toggle" id="toggleSecret">显示</button></div>
           <input type="password" id="secretInput" value="" spellcheck="false" />
-          <div class="field-hint">
-            仅本地存储（macOS Keychain / Windows Credential Locker），不会上传到任何服务器。
-            <a id="howToCredsLink" href="https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-app-id" target="_blank" rel="noopener">如何获取 →</a>
-          </div>
+          <div class="field-hint">仅本地存储（macOS Keychain / Windows Credential Locker），不会上传到任何服务器。<a id="howToCredsLink" href="#" >如何获取 →</a></div>
         </div>
-
         <div class="status-card idle" id="connCard">
-          <div class="row head">
-            <svg id="connIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
-            <span id="connHeadTxt">未连接 · 填写凭证后点击「测试连接」</span>
-            <span class="time" id="connTime"></span>
+          <div class="sc-head">
+            <span class="sc-tick" aria-hidden="true">
+              <svg id="connIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+            </span>
+            <b id="connHeadTxt">未连接 · 填写凭证后点击「测试连接」</b>
+            <span class="sc-count" id="readyBadge" hidden></span>
+            <span class="sc-time" id="connTime"></span>
           </div>
-          <div class="perm-grid" id="connGrid" hidden>
-            <div class="perm">
-              <span class="pdot"></span>
-              <span class="name">tenant_access_token</span>
-              <span class="ok-txt">可获取</span>
-            </div>
-            <div class="perm">
-              <span class="pdot"></span>
-              <span class="name">bot:v3:info</span>
-              <span class="ok-txt">可访问</span>
-            </div>
-            <div class="perm" id="permUpload">
-              <span class="pdot"></span>
-              <span class="name">im:resource:upload</span>
-              <span class="ok-txt" id="permUploadStatus">检测中…</span>
-            </div>
-          </div>
-          <div class="perm-hint" id="connPermHint" hidden>
-            <div class="perm-hint-title">缺少图片上传权限</div>
-            <div class="perm-hint-desc">上传图片需要 <code>im:resource:upload</code> 权限。点击下方按钮前往飞书开放平台申请，<b>申请后必须发布新版本</b>才能生效。</div>
-            <button class="btn-primary perm-apply-btn" id="applyPermBtn">申请 im:resource:upload 权限 ↗</button>
-          </div>
+          <ul class="scope-list" id="connGrid" hidden>
+            <li class="scope">
+              <span class="scope-name"><code class="scope-code">tenant_access_token</code></span>
+              <span class="sbadge neutral">可获取</span>
+            </li>
+            <li class="scope">
+              <span class="scope-name"><code class="scope-code">bot:v3:info</code></span>
+              <span class="sbadge neutral">可访问</span>
+            </li>
+            <li class="scope">
+              <span class="scope-name"><code class="scope-code">im:resource:upload</code></span>
+              <span class="sbadge neutral" id="permUploadBadge">检测中…</span>
+            </li>
+            <li class="scope">
+              <span class="scope-name"><code class="scope-code">drive:drive</code><span class="scope-note">云空间</span></span>
+              <span class="sbadge neutral" id="permDriveBadge">检测中…</span>
+            </li>
+          </ul>
+          <div id="connPermHint" hidden></div>
         </div>
-
         <div class="action-row">
           <button class="btn-secondary" id="testConnBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -333,96 +353,202 @@
         </div>
       </section>
 
-      <!-- 偏好 pane -->
-      <section class="pane" id="panePref">
-        <h3>偏好</h3>
-        <p class="desc">调整青鸟的外观与默认行为，所有偏好仅影响本设备。</p>
-
-        <div class="pref-section">
-          <h4>主题</h4>
-          <div class="theme-grid" id="themeGrid">
-            <button type="button" class="theme-card active" data-theme="auto" aria-pressed="true">
-              <div class="prv auto">
-                <div class="header-bar"></div>
-                <div class="body-bar"></div>
-                <div class="accent-btn"></div>
-              </div>
-              <div class="lbl">
-                <span class="radio"></span>
-                <b>自动</b>
-                <span class="sub">跟随系统</span>
-              </div>
-            </button>
-            <button type="button" class="theme-card" data-theme="light" aria-pressed="false">
-              <div class="prv light">
-                <div class="header-bar"></div>
-                <div class="body-bar"></div>
-                <div class="accent-btn"></div>
-              </div>
-              <div class="lbl">
-                <span class="radio"></span>
-                <b>明亮</b>
-              </div>
-            </button>
-            <button type="button" class="theme-card" data-theme="dark" aria-pressed="false">
-              <div class="prv dark">
-                <div class="header-bar"></div>
-                <div class="body-bar"></div>
-                <div class="accent-btn"></div>
-              </div>
-              <div class="lbl">
-                <span class="radio"></span>
-                <b>黑暗</b>
-              </div>
-            </button>
+      <section class="pane" id="paneAgent">
+        <div class="pane-title-row">
+          <h3>Agent 集成</h3>
+        </div>
+        <p class="desc">让 <b style="color:var(--fg);font-weight:500">AI Agent</b> 通过命令行调用青鸟发消息、上传图片、查看历史。该能力在规划中，当前版本暂未开放。</p>
+        <div class="agent-card" data-agent="cli">
+          <div class="agent-card-head">
+            <div class="agent-ico cli">&gt;_</div>
+            <div class="agent-meta">
+              <b>青鸟 CLI <code>qingniao</code></b>
+              <span>在终端里发消息、上传图片、查看历史，支持 <code>--json</code> 结构化输出</span>
+            </div>
+            <div class="agent-card-cta">
+              <span class="agent-status" style="background:var(--track);color:var(--muted)">规划中</span>
+            </div>
           </div>
         </div>
-
-        <div class="pref-section">
-          <h4>编辑器</h4>
-          <div class="pref-row">
-            <div class="rlbl">
-              <b>智能识别默认</b>
-              <span>粘贴或输入时，优先尝试哪种消息类型</span>
+        <div class="agent-card" data-agent="skill">
+          <div class="agent-card-head">
+            <div class="agent-ico skill">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 7h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h5"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/><circle cx="12" cy="14" r="2"/></svg>
             </div>
-            <div class="pref-seg" role="tablist">
-              <button class="active">自动</button>
-              <button>优先富文本</button>
-              <button>优先纯文本</button>
+            <div class="agent-meta">
+              <b>Agent 技能包 <code>SKILL.md</code></b>
+              <span>让 Claude / Codex / 豆包等 Agent 识别青鸟能力，一个 <code>send</code> 就能发出去</span>
             </div>
-          </div>
-          <div class="pref-row">
-            <div class="rlbl">
-              <b>发送快捷键</b>
-              <span>控制按下什么组合会真的把消息送出去</span>
+            <div class="agent-card-cta">
+              <span class="agent-status" style="background:var(--track);color:var(--muted)">规划中</span>
             </div>
-            <div class="pref-seg" role="tablist">
-              <button class="active">⌘↵</button>
-              <button>Enter</button>
-            </div>
-          </div>
-          <div class="pref-row">
-            <div class="rlbl">
-              <b>发送成功提示音</b>
-              <span>结果 toast 出现时播放一次系统音效</span>
-            </div>
-            <button class="switch on" aria-label="切换发送成功提示音"></button>
-          </div>
-          <div class="pref-row">
-            <div class="rlbl">
-              <b>粘贴图片自动上传</b>
-              <span>需要已配置飞书应用凭证，才能换取 image_key</span>
-            </div>
-            <button class="switch on" aria-label="切换粘贴自动上传"></button>
           </div>
         </div>
       </section>
 
-      <!-- 关于 pane -->
+      <section class="pane" id="paneTransfer">
+        <div class="pane-title-row"><h3>文件传输</h3></div>
+        <p class="desc">在内网机与外网机之间互传文件。传输是<b style="color:var(--fg);font-weight:500">端到端加密</b>的：文件在发送方机器上加密，只有配过对的接收方机器能解开，飞书和群里的其他人拿到的都是密文。</p>
+
+        <div class="pref-section">
+          <h4>本地服务</h4>
+          <div class="port-row">
+            <div class="pf">
+              <div class="field-head"><b>配置端口</b></div>
+              <input type="text" id="portInput" value="9876" spellcheck="false" aria-describedby="portHint" />
+            </div>
+            <div class="pnow" id="portNow">
+              <span class="sdot" aria-hidden="true"></span>
+              <span class="plbl">实际绑定</span>
+              <code id="portBound">未启动</code>
+            </div>
+          </div>
+          <div class="field-hint" id="portHint" style="margin-top:8px">
+            群消息里的链接一律用实际绑定端口生成。改端口需要保存并重启服务，重启后此前发出的旧链接会失效 —— 端口被占用时青鸟不会自动换端口，只会明确告诉你是谁占着。
+          </div>
+          <div class="action-row" style="margin-top:12px">
+            <button class="btn-secondary" id="portRestart">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              保存并重启服务
+            </button>
+          </div>
+          <div class="pref-row" style="margin-top:6px">
+            <div class="rlbl"><b>随青鸟常驻后台</b><span>关闭窗口后服务继续监听，群里的链接才点得开</span></div>
+            <button class="switch on" id="residentSwitch" aria-label="切换本地服务常驻"></button>
+          </div>
+        </div>
+
+        <div class="pref-section">
+          <h4>下载</h4>
+          <div class="field">
+            <div class="field-head"><b>下载目录</b></div>
+            <div class="dir-row">
+              <span class="dpath" id="downloadDirPath">系统下载目录</span>
+              <button class="btn-secondary" id="dirPick">更改…</button>
+            </div>
+            <div class="field-hint">取回的文件直接存到这里，不再弹框询问；目录不存在时自动创建，重名会追加时间戳。</div>
+          </div>
+        </div>
+
+        <div class="pref-section">
+          <h4>传输密钥</h4>
+          <div class="key-card" id="keyCard" data-slot="">
+            <div class="key-head">
+              <div class="kico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1.4"/></svg>
+              </div>
+              <div class="kmeta">
+                <b id="keyHeadTitle">传输密钥 · 未配置</b>
+                <div class="krow" id="keyMetaRow">
+                  <span class="kid" id="keyFp" hidden>指纹 --------</span>
+                  <span id="keyStoreHint">尚未生成或导入主密钥</span>
+                </div>
+              </div>
+              <div class="kacts">
+                <button class="agent-btn" data-key="generate" id="keyGenerateBtn">生成密钥</button>
+                <button class="agent-btn" data-key="export" hidden>导出配对</button>
+                <button class="agent-btn" data-key="import">导入</button>
+                <button class="agent-btn" data-key="rotate" hidden>轮换</button>
+              </div>
+            </div>
+
+            <div class="key-slot key-slot-generate">
+              <h5>生成本机主密钥</h5>
+              <p>首次使用时生成一把 256 位主密钥，存入本机系统凭据库。第二台机器通过「导入」完成配对。</p>
+              <div class="action-row">
+                <button class="btn-primary" id="keyGenerateConfirm">生成密钥并存入凭据库</button>
+              </div>
+            </div>
+
+            <div class="key-slot key-slot-export">
+              <h5>把密钥带到你的另一台机器</h5>
+              <p>另一台机器在「导入」里粘贴下面这串，两边显示的指纹一致就算配对成功。没配过对的机器收到文件也打不开。</p>
+              <div class="key-reveal">
+                <code class="masked" id="keyPlain">•••• •••• •••• •••• •••• •••• •••• ••••</code>
+                <button class="btn-secondary" id="keyReveal">显示</button>
+                <button class="btn-secondary" id="keyCopy">复制</button>
+              </div>
+              <div class="warn-note">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span><b>严禁把这串密钥发进飞书群、云文档或任何飞书载体。</b>端到端加密的前提就是飞书拿不到这把钥匙；一旦它经飞书传过一次，所有文件都等于明文。请当面输入，或走你自己信得过的渠道。</span>
+              </div>
+            </div>
+
+            <div class="key-slot key-slot-import">
+              <h5>从另一台机器导入</h5>
+              <p>粘贴另一台机器「导出配对」里显示的那串密钥，青鸟会算出指纹给你和对面核对。</p>
+              <input type="text" id="keyImportInput" spellcheck="false" placeholder="64 位十六进制主密钥" />
+              <div class="fp-match bad" id="keyImportFp" hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+                <span id="keyImportFpText"></span>
+              </div>
+              <div class="action-row" style="margin-top:12px">
+                <button class="btn-primary" id="keyImportConfirm" disabled>确认导入并覆盖本机密钥</button>
+              </div>
+            </div>
+
+            <div class="key-slot key-slot-rotate">
+              <h5>轮换主密钥</h5>
+              <p>换一把新密钥。旧密钥还会保留 <b style="color:var(--fg);font-weight:500">30 天</b>，这期间已经发出去的旧链接仍然能下载；过了 30 天旧链接全部失效。</p>
+              <div class="warn-note">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>换完之后必须把新密钥重新导入另一台机器，否则两台机器之间就传不了了。</span>
+              </div>
+              <div class="action-row" style="margin-top:12px">
+                <button class="btn-danger" id="keyRotateConfirm">生成新密钥并保留旧密钥 30 天</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane" id="panePref">
+        <h3>偏好</h3>
+        <p class="desc">调整青鸟的外观与默认行为，所有偏好仅影响本设备。</p>
+        <div class="pref-section">
+          <h4>主题</h4>
+          <div class="theme-grid" id="themeGrid">
+            <button type="button" class="theme-card active" data-theme="auto" aria-pressed="true">
+              <div class="prv auto"><div class="header-bar"></div><div class="body-bar"></div><div class="accent-btn"></div></div>
+              <div class="lbl"><span class="radio"></span><b>自动</b><span class="sub">跟随系统</span></div>
+            </button>
+            <button type="button" class="theme-card" data-theme="light" aria-pressed="false">
+              <div class="prv light"><div class="header-bar"></div><div class="body-bar"></div><div class="accent-btn"></div></div>
+              <div class="lbl"><span class="radio"></span><b>明亮</b></div>
+            </button>
+            <button type="button" class="theme-card" data-theme="dark" aria-pressed="false">
+              <div class="prv dark"><div class="header-bar"></div><div class="body-bar"></div><div class="accent-btn"></div></div>
+              <div class="lbl"><span class="radio"></span><b>黑暗</b></div>
+            </button>
+          </div>
+        </div>
+        <div class="pref-section">
+          <h4>编辑器</h4>
+          <div class="pref-row">
+            <div class="rlbl"><b>智能识别默认</b><span>粘贴或输入时，优先尝试哪种消息类型</span></div>
+            <div class="pref-seg" id="segDetect" role="tablist">
+              <button data-v="auto" class="active">自动</button><button data-v="post">优先富文本</button><button data-v="text">优先纯文本</button>
+            </div>
+          </div>
+          <div class="pref-row">
+            <div class="rlbl"><b>发送快捷键</b><span>控制按下什么组合会真的把消息送出去</span></div>
+            <div class="pref-seg" id="segHotkey" role="tablist"><button data-v="mod" class="active">⌘↵</button><button data-v="enter">Enter</button></div>
+          </div>
+          <div class="pref-row">
+            <div class="rlbl"><b>发送成功提示音</b><span>结果提示出现时播放一次系统音效</span></div>
+            <button class="switch on" id="swSound" aria-label="切换发送成功提示音"></button>
+          </div>
+          <div class="pref-row">
+            <div class="rlbl"><b>粘贴图片自动插入</b><span>粘贴的图片直接插到光标处，不再单独弹确认框</span></div>
+            <button class="switch on" id="swPaste" aria-label="切换粘贴自动插入"></button>
+          </div>
+        </div>
+      </section>
+
       <section class="pane" id="paneAbout">
         <div class="about-hero">
           <div class="logo-lg">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/>
             </svg>
           </div>
@@ -430,31 +556,14 @@
           <div class="ver" id="aboutVersion">v0.1.0</div>
           <div class="quote">「蓬山此去无多路，青鸟殷勤为探看」</div>
         </div>
-
         <div class="about-meta">
-          <div class="item">
-            <b>飞书 OpenAPI</b>
-            <span>v1.x · stable</span>
-          </div>
-          <div class="item">
-            <b>运行时</b>
-            <span>Tauri</span>
-          </div>
-          <div class="item">
-            <b>数据目录</b>
-            <span style="font-size:11px">~/Library/Application Support/com.qingniao.app</span>
-          </div>
-          <div class="item">
-            <b>最近更新</b>
-            <span>2026-09-05</span>
-          </div>
+          <div class="item"><b>飞书 OpenAPI</b><span>v1.x · stable</span></div>
+          <div class="item"><b>运行时</b><span>Tauri</span></div>
+          <div class="item"><b>数据目录</b><span style="font-size:11px">~/Library/Application Support/qingniao</span></div>
+          <div class="item"><b>最近更新</b><span>2026-09-17</span></div>
         </div>
-
         <div class="about-links">
-          <a href="https://github.com/fxfboy/qingniao" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-            GitHub ↗
-          </a>
+          <a href="https://github.com/fxfboy/qingniao" target="_blank" rel="noopener">GitHub ↗</a>
           <a href="https://github.com/fxfboy/qingniao/issues" target="_blank" rel="noopener">反馈问题 ↗</a>
           <a href="https://github.com/fxfboy/qingniao/releases" target="_blank" rel="noopener">发行说明</a>
           <a href="https://github.com/fxfboy/qingniao/blob/main/LICENSE" target="_blank" rel="noopener">开源许可</a>
@@ -474,7 +583,7 @@
   </div>
 </div>
 
-<!-- ==== 管理机器人 Modal ==== -->
+<!-- 管理机器人 Modal -->
 <div class="overlay" id="manageOverlay" data-od-id="manage-overlay" role="dialog" aria-modal="true" aria-labelledby="manageTitle">
   <div class="modal" style="width:640px" role="document">
     <header>
@@ -486,142 +595,41 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </header>
-
-    <div class="body" style="grid-template-columns: 1fr">
-      <section class="pane active" style="padding: 22px 26px 26px">
+    <div class="body single">
+      <section class="pane active">
         <h3>群机器人（Webhook）</h3>
-        <p class="desc">
-          每个机器人对应一个飞书群，青鸟据此决定消息发去哪里。
-          <b style="color:var(--fg);font-weight:500">签名密钥</b>是可选的：留空则不带签名，飞书群若开启了"仅接受签名"会拒收。
-        </p>
+        <p class="desc">每个机器人对应一个飞书群，青鸟据此决定消息发去哪里。<b style="color:var(--fg);font-weight:500">签名密钥</b>是可选的：留空则不带签名，飞书群若开启了「仅接受签名」会拒收。</p>
+        <div class="bot-list" id="botList"></div>
 
-        <div class="bot-list" id="botList">
-          <div class="bot-list-item" data-bot="TK">
-            <div class="bot-list-head">
-              <div class="avt">TK</div>
-              <div class="meta">
-                <b>TK</b>
-                <div class="row">
-                  <span>open.feishu.cn/…/12d180a3-f4b2</span>
-                  <span class="tag ok">已签名</span>
-                </div>
-              </div>
-              <div class="acts">
-                <button data-action="edit">编辑</button>
-                <button class="danger" data-action="delete">删除</button>
-              </div>
-            </div>
-            <div class="bot-list-edit">
-              <div class="edit-grid">
-                <input type="text" value="TK" placeholder="名称" />
-                <input type="text" value="ABCd1234EfGhIjKlMn5678" placeholder="签名密钥（留空则不带签名）" />
-                <input type="text" class="full" value="https://open.feishu.cn/open-apis/bot/v2/hook/12d180a3-f4b2-4a5c-b7e9-4c88ab001234" placeholder="Webhook 地址" />
-              </div>
-              <div class="edit-actions">
-                <span class="edit-hint">修改会立即生效，不影响已发送的历史消息</span>
-                <button data-action="cancel-edit">取消</button>
-                <button class="primary" data-action="save-edit">保存修改</button>
-              </div>
-            </div>
-            <div class="bot-list-confirm">
-              <span class="msg">确认删除 <b>TK</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>
-              <button data-action="cancel-delete">取消</button>
-              <button class="danger" data-action="confirm-delete">确认删除</button>
-            </div>
-          </div>
-
-          <div class="bot-list-item" data-bot="产品团队">
-            <div class="bot-list-head">
-              <div class="avt alt">产</div>
-              <div class="meta">
-                <b>产品团队</b>
-                <div class="row">
-                  <span>open.feishu.cn/…/f9a2b1c7-88ee</span>
-                  <span class="tag ok">已签名</span>
-                </div>
-              </div>
-              <div class="acts">
-                <button data-action="edit">编辑</button>
-                <button class="danger" data-action="delete">删除</button>
-              </div>
-            </div>
-            <div class="bot-list-edit">
-              <div class="edit-grid">
-                <input type="text" value="产品团队" placeholder="名称" />
-                <input type="text" value="Qw3rTyUiOpAsDfGhJk9012" placeholder="签名密钥（留空则不带签名）" />
-                <input type="text" class="full" value="https://open.feishu.cn/open-apis/bot/v2/hook/f9a2b1c7-88ee-4d76-a1b3-2f5e9c00abcd" placeholder="Webhook 地址" />
-              </div>
-              <div class="edit-actions">
-                <span class="edit-hint">修改会立即生效，不影响已发送的历史消息</span>
-                <button data-action="cancel-edit">取消</button>
-                <button class="primary" data-action="save-edit">保存修改</button>
-              </div>
-            </div>
-            <div class="bot-list-confirm">
-              <span class="msg">确认删除 <b>产品团队</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>
-              <button data-action="cancel-delete">取消</button>
-              <button class="danger" data-action="confirm-delete">确认删除</button>
-            </div>
-          </div>
-
-          <div class="bot-list-item" data-bot="Ops 告警">
-            <div class="bot-list-head">
-              <div class="avt warn">Op</div>
-              <div class="meta">
-                <b>Ops 告警</b>
-                <div class="row">
-                  <span>open.feishu.cn/…/3ce880d1-7a2f</span>
-                  <span class="tag warn">未签名</span>
-                </div>
-              </div>
-              <div class="acts">
-                <button data-action="edit">编辑</button>
-                <button class="danger" data-action="delete">删除</button>
-              </div>
-            </div>
-            <div class="bot-list-edit">
-              <div class="edit-grid">
-                <input type="text" value="Ops 告警" placeholder="名称" />
-                <input type="text" value="" placeholder="签名密钥（留空则不带签名）" />
-                <input type="text" class="full" value="https://open.feishu.cn/open-apis/bot/v2/hook/3ce880d1-7a2f-4b3c-8ee6-1a2b3c4d5e6f" placeholder="Webhook 地址" />
-              </div>
-              <div class="edit-actions">
-                <span class="edit-hint">修改会立即生效，不影响已发送的历史消息</span>
-                <button data-action="cancel-edit">取消</button>
-                <button class="primary" data-action="save-edit">保存修改</button>
-              </div>
-            </div>
-            <div class="bot-list-confirm">
-              <span class="msg">确认删除 <b>Ops 告警</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>
-              <button data-action="cancel-delete">取消</button>
-              <button class="danger" data-action="confirm-delete">确认删除</button>
-            </div>
-          </div>
-        </div>
-
-        <h4 style="margin: 22px 0 0; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600">添加新机器人</h4>
+        <h4 style="margin: 22px 0 0; font-size:11px; color: var(--muted); text-transform:uppercase; letter-spacing:0.6px; font-weight:600">添加新机器人</h4>
         <div class="add-bot-form">
-          <input type="text" placeholder="名称（如：测试群机器人）" />
-          <input type="text" placeholder="签名密钥（没有可留空）" />
-          <input type="text" class="full" placeholder="Webhook 地址 https://open.feishu.cn/open-apis/bot/v2/hook/…" />
-          <div class="form-error" id="addBotError" style="color:#EA6668;font-size:12px;margin-top:6px;min-height:0"></div>
+          <input type="text" id="addBotName" placeholder="名称（如：测试群机器人）" />
+          <input type="text" id="addBotSecret" placeholder="签名密钥（没有可留空）" />
+          <input type="text" id="addBotUrl" class="full" placeholder="Webhook 地址 https://open.feishu.cn/open-apis/bot/v2/hook/…" />
           <div class="foot">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            <span>签名密钥用于自动计算 sign，留空则不带签名</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span id="addBotError">签名密钥用于自动计算 sign，留空则不带签名</span>
             <div class="spacer"></div>
-            <button class="btn-primary" style="padding: 7px 14px">添加</button>
+            <button class="btn-primary" id="addBotBtn" style="padding: 7px 14px">添加</button>
           </div>
         </div>
       </section>
     </div>
-
     <footer>
-      <div class="left">共 3 个机器人</div>
+      <div class="left" id="botCountLabel">共 0 个机器人</div>
       <div class="spacer"></div>
       <button class="btn-secondary" id="closeManageFooter">完成</button>
     </footer>
   </div>
 </div>
-  <script src="main.js"></script>
+
+<!-- 结果提示 -->
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="tdot" aria-hidden="true"></span>
+  <span id="toastText">就绪</span>
+  <code id="toastMeta"></code>
+</div>
+
+<script src="main.js"></script>
 </body>
 </html>
