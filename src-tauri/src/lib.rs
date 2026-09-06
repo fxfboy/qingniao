@@ -79,6 +79,32 @@ fn mask_webhook(url: &str) -> String {
     }
 }
 
+/// 连接测试结果
+#[derive(Serialize)]
+struct ConnTestResult {
+    app_name: String,
+    has_upload_permission: bool,
+    apply_url: Option<String>,
+}
+
+/// 1x1 透明 PNG，用于探测 im:resource:upload 权限（极小，不产生实际影响）
+const PROBE_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+/// 从飞书权限不足的错误消息中提取申请链接，提取不到则按格式构造
+fn extract_apply_url(msg: &str, app_id: &str) -> String {
+    if let Some(start) = msg.find("https://open.feishu.cn/app/") {
+        let rest = &msg[start..];
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '"' || c == '）' || c == ')' || c == '，')
+            .unwrap_or(rest.len());
+        return rest[..end].to_string();
+    }
+    format!(
+        "https://open.feishu.cn/app/{}/auth?q=im:resource:upload&op_from=openapi&token_type=tenant",
+        app_id
+    )
+}
+
 /// 一个已保存的 webhook 机器人
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct WebhookItem {
@@ -325,9 +351,9 @@ fn upload_image(
     Ok(image_key)
 }
 
-/// 测试飞书应用凭证：换取 tenant_access_token 并读取机器人信息，返回应用名
+/// 测试飞书应用凭证：换取 tenant_access_token → 读取机器人信息 → 探测 im:resource:upload 权限
 #[tauri::command]
-fn test_connection(app: tauri::AppHandle, app_id: String, app_secret: String) -> Result<String, String> {
+fn test_connection(app: tauri::AppHandle, app_id: String, app_secret: String) -> Result<ConnTestResult, String> {
     let app_id = app_id.trim().to_string();
     let app_secret = app_secret.trim().to_string();
     if app_id.is_empty() || app_secret.is_empty() {
@@ -399,7 +425,51 @@ fn test_connection(app: tauri::AppHandle, app_id: String, app_secret: String) ->
         .unwrap_or("飞书应用")
         .to_string();
     write_log(&app, LV_INFO, &format!("test_connection: 连接成功 app_name={}", app_name));
-    Ok(app_name)
+
+    // 3. 探测 im:resource:upload 权限：上传一张 1x1 透明 PNG
+    let has_upload_permission;
+    let apply_url;
+    {
+        use base64::Engine;
+        let probe_bytes = base64::engine::general_purpose::STANDARD
+            .decode(PROBE_PNG_BASE64)
+            .map_err(|e| format!("探测图片解码失败: {e}"))?;
+        let part = reqwest::blocking::multipart::Part::bytes(probe_bytes).file_name("probe.png");
+        let form = reqwest::blocking::multipart::Form::new()
+            .text("image_type", "message")
+            .part("image", part);
+        let probe_resp = client
+            .post("https://open.feishu.cn/open-apis/im/v1/images")
+            .bearer_auth(&token)
+            .multipart(form)
+            .send()
+            .map_err(|e| {
+                write_log(&app, LV_ERROR, &format!("test_connection 探测上传权限请求失败: {}", err_chain(&e)));
+                format!("探测上传权限失败: {e}")
+            })?;
+        let probe_json: serde_json::Value = probe_resp
+            .json()
+            .map_err(|e| format!("探测响应解析失败: {e}"))?;
+        if probe_json["code"].as_i64().unwrap_or(-1) == 0 {
+            has_upload_permission = true;
+            apply_url = None;
+            write_log(&app, LV_INFO, "test_connection: im:resource:upload 权限已开通");
+        } else {
+            has_upload_permission = false;
+            let msg = probe_json["msg"].as_str().unwrap_or("");
+            apply_url = Some(extract_apply_url(msg, &app_id));
+            write_log(&app, LV_WARN, &format!(
+                "test_connection: 缺少 im:resource:upload 权限 code={} msg={}",
+                probe_json["code"], probe_json["msg"]
+            ));
+        }
+    }
+
+    Ok(ConnTestResult {
+        app_name,
+        has_upload_permission,
+        apply_url,
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
