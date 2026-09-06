@@ -16,10 +16,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# tray-icon：托盘/菜单栏能力的唯一启用方式。
+# 注意：不要在 tauri.conf.json 配置 app.trayIcon——Tauri 会在 initialize_plugins()
+# 之前依据该配置自动创建 tray，绕过 single-instance 的主实例判定（见设计文档 §8.1、§13.1 事实 15）。
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+# 退出二次确认用非阻塞原生对话框（§7.2.2 第 2 步）
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "multipart"] }
 base64 = "0.22"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
+# std + alloc：`log::set_boxed_logger` 需要 alloc feature（0.4.34 默认特性不含它）
+log = { version = "0.4", features = ["std", "alloc"] }

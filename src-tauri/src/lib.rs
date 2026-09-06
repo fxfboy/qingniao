@@ -4,6 +4,17 @@ use std::path::{Path, PathBuf};
 use std::io::Write;
 use tauri::Manager;
 
+/// 常驻功能的模块划分（设计文档 dock/tray 常驻功能设计文档 v0.4）
+pub mod lifecycle;
+pub mod service;
+pub mod tray;
+
+use lifecycle::{ExitCoordinator, ExitState, FinalCleanup, QuitSource, QuitStep};
+use service::{
+    LocalServiceController, LocalServiceStatus, PhaseAService, ServiceStatusProvider,
+    TransferSnapshot,
+};
+
 /// 日志级别
 const LV_DEBUG: &str = "debug";
 const LV_INFO: &str = "info";
@@ -29,15 +40,97 @@ fn now_str() -> String {
     )
 }
 
+/// 向指定文件追加一行日志（写失败不影响主流程）
+fn append_log_line(path: &Path, level: &str, msg: &str) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "[{}] [{}] {}", now_str(), level.to_uppercase(), msg);
+    }
+}
+
 /// 追加一行日志到 <配置目录>/qingniao.log（写失败不影响主流程）
 fn write_log(app: &tauri::AppHandle, level: &str, msg: &str) {
+    if let Ok(path) = log_path(app) {
+        append_log_line(&path, level, msg);
+    }
+}
+
+/// 把 `log` crate 的记录转发到与应用同一份日志文件。
+///
+/// **为什么需要它**：Tauri 核心不安装 logger，`log::info!` 之类在默认情况下是
+/// 彻底的 no-op（不会报错，也不会落盘）。常驻功能的 `lifecycle` / `tray` / `service`
+/// 模块刻意不依赖 `AppHandle`（以便脱离 Tauri 单测），因此无法直接调用 `write_log`；
+/// 改为安装这个全局 logger，让 `log::*` 与 `write_log` 落到同一份
+/// `<配置目录>/qingniao.log`。
+struct FileLogger {
+    path: PathBuf,
+}
+
+impl log::Log for FileLogger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        let level = match record.level() {
+            log::Level::Error => LV_ERROR,
+            log::Level::Warn => LV_WARN,
+            log::Level::Info => LV_INFO,
+            log::Level::Debug | log::Level::Trace => LV_DEBUG,
+        };
+        append_log_line(&self.path, level, &record.args().to_string());
+    }
+
+    fn flush(&self) {}
+}
+
+/// 安装文件 logger。在 `setup` 中、任何会写日志的初始化之前调用一次。
+fn install_file_logger(app: &tauri::AppHandle) {
     let Ok(path) = log_path(app) else { return };
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = writeln!(f, "[{}] [{}] {}", now_str(), level.to_uppercase(), msg);
+    // 已安装过时 set_boxed_logger 返回 Err，忽略即可。
+    if log::set_boxed_logger(Box::new(FileLogger { path })).is_ok() {
+        // 默认记到 info；debug/trace 不进文件，避免刷屏。
+        log::set_max_level(log::LevelFilter::Info);
     }
+}
+
+/// **仅 debug 构建**：驱动本地服务状态，用于验收 A8（状态刷新）。
+///
+/// 阶段 A 没有真实 listener，服务状态是静态的；没有这个驱动入口，
+/// 「状态迁移 → 菜单文案更新」这条链路无法在运行中的应用里被观察到。
+/// release 构建不含该命令（见 `generate_handler!` 上的 `#[cfg]`）。
+///
+/// 用法：`invoke('debug_set_service_status', { status: 'running:12345' })`
+/// 取值：`starting` / `running:<port>` / `stopping` / `stopped` / `port_in_use:<port>`
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn debug_set_service_status(app: tauri::AppHandle, status: String) {
+    let parsed = match status.split_once(':') {
+        Some(("running", port)) => LocalServiceStatus::Running {
+            bound_port: port.parse().unwrap_or(service::DEFAULT_LOCAL_PORT),
+        },
+        Some(("port_in_use", port)) => LocalServiceStatus::Failed {
+            kind: service::ServiceFailure::PortInUse,
+            requested_port: port.parse().unwrap_or(service::DEFAULT_LOCAL_PORT),
+        },
+        _ => match status.as_str() {
+            "starting" => LocalServiceStatus::Starting,
+            "stopping" => LocalServiceStatus::Stopping,
+            "stopped" => LocalServiceStatus::Stopped,
+            other => {
+                log::warn!("debug_set_service_status: 未知状态 {other}");
+                return;
+            }
+        },
+    };
+    log::info!("debug_set_service_status: {parsed:?}");
+    // 走唯一推送点：更新 provider + 刷新菜单（§5.2）
+    app.state::<AppState>().set_service_status(parsed);
 }
 
 /// 把错误及其完整 source 链拼成一行，便于定位网络层具体原因（超时/连接重置/DNS 等）
@@ -472,18 +565,397 @@ fn test_connection(app: tauri::AppHandle, app_id: String, app_secret: String) ->
     })
 }
 
+// ---------------------------------------------------------------------------
+// 常驻功能：应用状态、窗口恢复、菜单分派、退出协议、启动装配
+// ---------------------------------------------------------------------------
+
+/// 应用级共享状态（§5.2：Rust `AppState` 持有服务状态、传输快照与菜单项句柄）
+pub struct AppState {
+    pub exit: ExitCoordinator,
+    pub service: PhaseAService,
+    /// 状态项显示端。存为 trait object 以便单测注入替身（A8 的 `unit/fake` 验收）
+    pub tray: std::sync::Mutex<Option<std::sync::Arc<dyn tray::StatusDisplay>>>,}
+
+impl AppState {
+    fn new() -> Self {
+        Self {
+            exit: ExitCoordinator::default(),
+            service: PhaseAService::new(),
+            tray: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// 服务状态迁移的**唯一推送点**（§5.2）。
+    ///
+    /// 先更新权威 provider，再刷新菜单项文字。任何改变服务状态的路径都必须走这里，
+    /// 否则菜单会一直显示陈旧状态——这正是「`refresh_status` 有定义但零调用」的成因。
+    pub fn set_service_status(&self, status: LocalServiceStatus) {
+        self.service.service.set_status(status);
+        self.sync_tray_status();
+    }
+
+    /// 按当前权威状态刷新常驻菜单的状态项（文案端口一律取自状态本身，§9.2）
+    pub fn sync_tray_status(&self) {
+        let label = self.service.service.snapshot().menu_label();
+        if let Some(display) = self.tray.lock().unwrap().as_ref() {
+            display.show_status(&label);
+        }
+    }
+}
+
+/// 恢复并聚焦主窗口（D2：单窗口隐藏复用，正常路径**不**重建）
+pub fn show_main_window(app: &tauri::AppHandle) {
+    match app.get_webview_window("main") {
+        Some(window) => {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        None => log::warn!("主窗口不存在，无法恢复"),
+    }
+}
+
+/// 菜单事件分派：一律按**稳定 `MenuId`**，不得用展示文字（§5.1）
+pub fn menu_action(app: &tauri::AppHandle, id: &str) {
+    match id {
+        tray::ID_OPEN_MAIN => show_main_window(app),
+        tray::ID_OPEN_DOWNLOADS => open_download_dir(app),
+        // 只读 / 未启用项不应产生事件
+        tray::ID_SERVICE_STATUS => log::warn!("service_status 为只读项，不应触发事件"),
+        tray::ID_OPEN_SERVICE_SETTINGS => log::warn!("本地服务设置尚未启用（阶段 B）"),
+        tray::ID_QUIT => request_quit(app, QuitSource::Menu),
+        // macOS 应用菜单的 Quit（⌘Q）：与托盘 Quit 同语义（§7.1），只是来源不同
+        tray::ID_APP_QUIT => request_quit(app, QuitSource::Shortcut),
+        other => log::warn!("未知菜单项: {other}"),
+    }
+}
+
+/// 打开下载目录（§9.5 / A11）：不存在则创建；任何失败都恢复主窗口暴露错误，不静默失败
+fn open_download_dir(app: &tauri::AppHandle) {
+    use tauri_plugin_opener::OpenerExt;
+
+    let dir = match app.path().download_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            log::warn!("无法定位下载目录: {e}");
+            show_main_window(app);
+            return;
+        }
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log::warn!("创建下载目录失败 {}: {e}", dir.display());
+        show_main_window(app);
+        return;
+    }
+    if let Err(e) = app
+        .opener()
+        .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+    {
+        log::warn!("打开下载目录失败 {}: {e}", dir.display());
+        show_main_window(app);
+    }
+}
+
+/// **仅 debug 构建**：从环境变量播种状态，便于验收需要「启动即处于某状态」的用例。
+///
+/// 阶段 A 没有真实传输，`TransferSnapshot` 恒为空，因此 A12（忙时退出二次确认）
+/// 的确认分支根本无法到达。用环境变量播种可以在不污染 UI 与 IPC 面的前提下驱动它。
+///
+/// 用法：`QINGNIAO_DEBUG_TRANSFER="cancellable:committing:cleanup"`，例如 `1:0:0`
+#[cfg(debug_assertions)]
+fn seed_debug_state_from_env(app: &tauri::AppHandle) {
+    let Ok(raw) = std::env::var("QINGNIAO_DEBUG_TRANSFER") else {
+        return;
+    };
+    let nums: Vec<u32> = raw
+        .split(':')
+        .map(|s| s.trim().parse().unwrap_or(0))
+        .collect();
+    let snapshot = TransferSnapshot {
+        accepting: true,
+        cancellable_count: nums.first().copied().unwrap_or(0),
+        committing_count: nums.get(1).copied().unwrap_or(0),
+        cleanup_pending_count: nums.get(2).copied().unwrap_or(0),
+        checkpointed: false,
+    };
+    log::warn!("已从环境变量播种传输快照: {snapshot:?}");
+    app.state::<AppState>()
+        .service
+        .transfer
+        .set_snapshot(snapshot);
+}
+
+/// 最终清理：由退出协议在 `Draining` 阶段调用（§7.2.2 第 3.4 / 3.5 步与第 4 步）
+struct AppCleanup {
+    app: tauri::AppHandle,
+}
+
+impl FinalCleanup for AppCleanup {
+    fn stop_listener(&self) {
+        // 阶段 A：由 fake 控制器停止；阶段 B 在此接入真实 HTTP listener 的停机与端口释放
+        let state = self.app.state::<AppState>();
+        state.service.service.stop();
+        // 状态迁移后立即推送菜单文案（§5.2）
+        state.sync_tray_status();
+        log::info!("本地服务已停止: {:?}", state.service.service.snapshot());
+    }
+
+    fn remove_tray(&self) {
+        let state = self.app.state::<AppState>();
+        // 幂等：重复调用无副作用。先释放句柄，再移除系统图标
+        if let Some(handles) = state.tray.lock().unwrap().take() {
+            drop(handles);
+        }
+        self.app.remove_tray_by_id(tray::TRAY_ID);
+    }
+
+    fn exit(&self, code: i32) {
+        self.app.exit(code);
+    }
+}
+
+/// 退出确认：恢复主窗口后弹原生对话框（§7.2.2 第 2 步）。
+///
+/// 两个线程相关的要点：
+/// 1. **不能同步等待**：`request_quit` 跑在菜单回调 / `RunEvent::ExitRequested` 的调用栈上
+///    （即事件循环内），在此阻塞等待用户作答会死锁事件循环。故用 `show(callback)`。
+/// 2. **回调不在主线程**：插件实现是
+///    `run_on_main_thread(|| thread::spawn(|| block_on(dialog)))`，回调在工作线程上执行。
+///    因此继续退出的动作必须用 `run_on_main_thread` 派回主线程——否则
+///    `remove_tray()` 会跨线程调用 AppKit 的 `NSStatusBar::removeStatusItem`。
+fn show_quit_dialog(app: &tauri::AppHandle, snapshot: TransferSnapshot) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+    let pending = snapshot.cancellable_count + snapshot.committing_count;
+    // 先把窗口亮出来，让用户能看到应用当前状态再决定
+    show_main_window(app);
+    log::warn!("退出确认：仍有 {pending} 个传输任务在进行，等待用户选择");
+
+    let app_for_cb = app.clone();
+    app.dialog()
+        .message(format!(
+            "仍有 {pending} 个传输任务正在进行。\n退出会中断它们（已完成的进度会保留）。"
+        ))
+        .title("退出青鸟")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "退出".to_string(),
+            "取消".to_string(),
+        ))
+        .show(move |confirmed| {
+            // **必须派回主线程**：插件的 `show` 是
+            // `run_on_main_thread(|| thread::spawn(|| block_on(dialog)))`，
+            // 也就是说这个回调在**工作线程**上执行；而继续退出的路径里
+            // `cleanup.remove_tray()` 会走到 tray-icon 的 `remove()`，
+            // 它直接调用 AppKit 的 `NSStatusBar::removeStatusItem`——AppKit 要求主线程。
+            // 不派回去就是跨线程操作 AppKit（未定义行为）。
+            let app = app_for_cb.clone();
+            if let Err(e) = app_for_cb.run_on_main_thread(move || resume_quit(&app, confirmed)) {
+                log::error!("无法把退出确认结果派回主线程: {e}");
+            }
+        });
+}
+
+/// 阶段二：把用户的选择送回退出协议（§7.2.2）
+fn resume_quit(app: &tauri::AppHandle, confirmed: bool) {
+    let state = app.state::<AppState>();
+    let cleanup = AppCleanup { app: app.clone() };
+    let step = state.exit.after_confirm(
+        confirmed,
+        state.service.service.as_ref(),
+        state.service.transfer.as_ref(),
+        state.service.transfer.as_ref(),
+        &cleanup,
+    );
+    report_quit_step(app, step);
+}
+
+/// 统一退出入口：所有显式退出都必须走这里（§7.1）
+pub fn request_quit(app: &tauri::AppHandle, source: QuitSource) {
+    let state = app.state::<AppState>();
+    let cleanup = AppCleanup { app: app.clone() };
+    let step = state.exit.begin_quit(
+        source,
+        state.service.service.as_ref(),
+        state.service.transfer.as_ref(),
+        state.service.transfer.as_ref(),
+        &cleanup,
+    );
+    report_quit_step(app, step);
+}
+
+/// 处理退出协议的每一步返回值
+fn report_quit_step(app: &tauri::AppHandle, step: QuitStep) {
+    match step {
+        QuitStep::AlreadyInProgress | QuitStep::Cancelled => {}
+        QuitStep::NeedsConfirm(snapshot) => show_quit_dialog(app, snapshot),
+        QuitStep::Exited(report) => {
+            if let Some(msg) = report.timeout_message() {
+                log::warn!("退出提示: {msg}");
+            }
+        }
+        QuitStep::AtomicCommitPending(report) => {
+            if let Some(msg) = report.timeout_message() {
+                log::warn!("退出提示: {msg}");
+            }
+            // 不可中断的原子提交尚未结束：把窗口亮出来告知用户，稍后可再次尝试退出
+            show_main_window(app);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        // §8.1：single-instance **最先注册**；只有主实例继续 setup 副作用
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
+        // 退出二次确认用的原生对话框（非阻塞 show(callback)，见 show_quit_dialog）
+        .plugin(tauri_plugin_dialog::init())
+        // 应用菜单：macOS 必须自建，才能把系统预定义 Quit 换成走统一退出协议的项
+        // （否则 ⌘Q 直接 terminate，绕过 §7.2 的 drain 与二次确认）。
+        .menu(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                tray::build_app_menu(app)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Ok(tauri::menu::Menu::default(app)?)
+            }
+        })
+        // 菜单事件统一分派点：托盘菜单与窗口应用菜单都汇聚到这里
+        .on_menu_event(|app, event| menu_action(app, event.id().as_ref()))
+        .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             load_config,
             save_config,
             send_webhook,
             upload_image,
             test_connection,
-            log_event
+            log_event,
+            // 仅 debug：A8 状态刷新的驱动入口
+            #[cfg(debug_assertions)]
+            debug_set_service_status
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .setup(|app| {
+            // 先装 logger，之后的 tray / 生命周期日志才有处可去
+            install_file_logger(app.handle());
+            log::info!("青鸟启动：单实例判定通过，开始初始化常驻功能");
+
+            // §8.1：仅在主实例、且 single-instance 判定之后构造**唯一**的 tray
+            let handles = tray::build_tray(app.handle())?;
+            app.state::<AppState>()
+                .tray
+                .lock()
+                .unwrap()
+                .replace(std::sync::Arc::new(handles));
+
+            // 仅 debug：按环境变量播种状态（验收 A12 用）
+            #[cfg(debug_assertions)]
+            seed_debug_state_from_env(app.handle());
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // §6 / D2：只拦截主窗口；prevent_close + hide，正常路径从不销毁重建
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| match event {
+        // §5.3 / P1-2：Dock 单击经 Reopen 恢复窗口，不能只依赖「系统默认」
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            if !has_visible_windows {
+                show_main_window(app_handle);
+            }
+        }
+        // §7.2.1：仅 Exiting 放行，其余状态一律拦截。
+        // AppHandle::exit() 自身会再次触发本事件，缺少放行分支将永远无法退出。
+        //
+        // 注意 macOS 的 ⌘Q / 应用菜单 Quit 走的也是这条事件——
+        // 必须在 Running 时把它导入统一退出协议，否则会被自家的 prevent_exit()
+        // 死死挡住，应用变得无法退出（§7.1 要求 ⌘Q 与菜单退出同语义）。
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
+            let state = app_handle.state::<AppState>();
+            log::info!(
+                "ExitRequested: code={code:?} state={:?}",
+                state.exit.state()
+            );
+            match state.exit.state() {
+                // 已放行：真正退出
+                ExitState::Exiting => {}
+                // 已在退出流程中：继续拦截，等 drain 结束
+                ExitState::Confirming | ExitState::Draining => api.prevent_exit(),
+                // 全新的用户退出请求：先拦截，再走统一协议
+                ExitState::Running => {
+                    api.prevent_exit();
+                    request_quit(app_handle, QuitSource::Shortcut);
+                }
+            }
+        }
+        _ => {}
+    });
+}
+
+#[cfg(test)]
+mod resident_tests {
+    use super::*;
+    use crate::service::ServiceFailure;
+    use std::sync::{Arc, Mutex};
+
+    /// 记录被推送的状态文案（替身）
+    #[derive(Default)]
+    struct RecordingDisplay {
+        labels: Mutex<Vec<String>>,
+    }
+
+    impl tray::StatusDisplay for RecordingDisplay {
+        fn show_status(&self, label: &str) {
+            self.labels.lock().unwrap().push(label.to_string());
+        }
+    }
+
+    /// A8：状态迁移必须把新文案推给状态项，且端口取自状态本身（不得硬编码）
+    #[test]
+    fn service_status_change_pushes_menu_label() {
+        let state = AppState::new();
+        let rec = Arc::new(RecordingDisplay::default());
+        *state.tray.lock().unwrap() = Some(rec.clone());
+
+        state.set_service_status(LocalServiceStatus::Running { bound_port: 12345 });
+        state.set_service_status(LocalServiceStatus::Failed {
+            kind: ServiceFailure::PortInUse,
+            requested_port: 12345,
+        });
+        state.set_service_status(LocalServiceStatus::Stopped);
+
+        assert_eq!(
+            *rec.labels.lock().unwrap(),
+            vec![
+                "本地服务：运行中 · 127.0.0.1:12345".to_string(),
+                "本地服务：启动失败（端口 12345 被占用）".to_string(),
+                "本地服务：已停止".to_string(),
+            ]
+        );
+    }
+
+    /// 无 tray 时刷新不得 panic：启动早期与退出清理后都会出现该状态
+    #[test]
+    fn sync_without_tray_is_noop() {
+        let state = AppState::new();
+        state.sync_tray_status();
+        state.set_service_status(LocalServiceStatus::Stopped);
+    }
 }
