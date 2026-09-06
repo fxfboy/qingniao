@@ -125,3 +125,106 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" "QingNiao_${{ needs.check-version.outputs.version }}_windows-x64.zip" --clobber
+
+  # Windows：附带 WebView2 固定运行时的便携 zip（适用于无法安装 WebView2 的内网/受限机器）
+  build-windows-webview2:
+    needs: [create-release, check-version]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri"
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: 准备 WebView2 固定运行时
+        shell: pwsh
+        run: |
+          $runtimeDir = "src-tauri\WebView2Runtime"
+
+          # windows-latest 自带 WebView2 运行时，从系统安装目录复制
+          $searchPaths = @(
+            "C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
+            "$env:LOCALAPPDATA\Microsoft\EdgeWebView\Application",
+            "C:\Program Files\Microsoft\EdgeWebView\Application"
+          )
+
+          $runtimeSource = $null
+          foreach ($basePath in $searchPaths) {
+            if (Test-Path $basePath) {
+              $versionFolder = Get-ChildItem $basePath -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and (Test-Path (Join-Path $_.FullName "msedgewebview2.exe")) } |
+                Sort-Object Name -Descending | Select-Object -First 1
+              if ($versionFolder) {
+                $runtimeSource = $versionFolder.FullName
+                Write-Host "Found WebView2 runtime: $runtimeSource (version $($versionFolder.Name))"
+                break
+              }
+            }
+          }
+
+          if (-not $runtimeSource) {
+            Write-Error "未在系统中找到 WebView2 运行时"
+            exit 1
+          }
+
+          # 复制到 src-tauri 目录，构建配置通过相对路径引用它
+          if (Test-Path $runtimeDir) { Remove-Item $runtimeDir -Recurse -Force }
+          Copy-Item -Path $runtimeSource -Destination $runtimeDir -Recurse -Force
+
+          if (-not (Test-Path "$runtimeDir\msedgewebview2.exe")) {
+            Write-Error "WebView2 运行时复制失败：未找到 msedgewebview2.exe"
+            exit 1
+          }
+          $size = (Get-ChildItem $runtimeDir -Recurse | Measure-Object Length -Sum).Sum / 1MB
+          Write-Host ("WebView2 运行时已就绪，大小: {0:N1} MB" -f $size)
+
+      - name: 配置 tauri 使用固定 WebView2 运行时
+        shell: pwsh
+        run: |
+          $configPath = "src-tauri\tauri.conf.json"
+          $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          $config.bundle.windows.webviewInstallMode = [PSCustomObject]@{
+            type = "fixedRuntime"
+            path = "./WebView2Runtime"
+          }
+          $config | ConvertTo-Json -Depth 20 | Set-Content $configPath -Encoding UTF8
+          Write-Host "tauri.conf.json 已更新为 fixedRuntime 模式："
+          Get-Content $configPath -Raw
+
+      - name: 构建 exe（固定 WebView2 运行时模式，跳过 msi / nsis）
+        run: npm run tauri build -- --no-bundle
+
+      - name: 打包 zip（exe + WebView2 运行时）
+        shell: pwsh
+        run: |
+          $releaseDir = "src-tauri\target\release"
+
+          # --no-bundle 不会自动复制运行时到输出目录，手动复制到 exe 同目录
+          if (-not (Test-Path "$releaseDir\WebView2Runtime")) {
+            Copy-Item -Path "src-tauri\WebView2Runtime" -Destination "$releaseDir\WebView2Runtime" -Recurse -Force
+            Write-Host "WebView2 运行时已复制到输出目录"
+          }
+
+          $zipName = "QingNiao_${{ needs.check-version.outputs.version }}_windows-x64-webview2.zip"
+          Compress-Archive -Path "$releaseDir\qingniao.exe", "$releaseDir\WebView2Runtime" -DestinationPath $zipName
+          $zip = Get-Item $zipName
+          Write-Host ("已生成: {0} ({1:N1} MB)" -f $zip.Name, ($zip.Length / 1MB))
+
+      - name: 上传 zip 到 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "QingNiao_${{ needs.check-version.outputs.version }}_windows-x64-webview2.zip" --clobber
