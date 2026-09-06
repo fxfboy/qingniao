@@ -1,0 +1,17 @@
+{
+  "worktree": {
+    "setup": "npm ci\ncargo fetch --manifest-path src-tauri/Cargo.toml"
+  },
+  "scripts": {
+    "verify": {
+      "command": "node scripts/verify-core.js"
+    },
+    "dev": {
+      "type": "service",
+      "command": "npm run tauri dev"
+    },
+    "check": {
+      "command": "cargo check --manifest-path src-tauri/Cargo.toml"
+    }
+  }
+}
