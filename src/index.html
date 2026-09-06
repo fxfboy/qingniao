@@ -89,18 +89,7 @@
         <div class="hint">
           输入 <kbd>/</kbd> 插入卡片元素 · 直接粘贴图片 · 支持 Markdown
         </div>
-        <textarea class="editor" id="editor" data-od-id="editor" spellcheck="false" placeholder="写点什么，或直接粘贴图片…&#10;&#10;支持 Markdown 语法（**粗体**、[链接](https://…)、# 标题、> 引用、- 列表、`代码`）；&#10;需要 @ 某人：@所有人 或 <at user_id=&quot;ou_xxx&quot;>名字</at>"># Q3 季度报告已发布 📊
-
-大家好，本季度的核心指标和复盘结论已经整理完毕，请各团队负责人在**本周五前**完成阅读并反馈。
-
-关键结论：
-- 新签 ARR 环比 **+18.4%**
-- 续约率维持在 **94%**（同比 +2.1pt）
-- 华南区域拓展进度不及预期，下季度需重点关注
-
-📎 [查看完整报告](https://tkhome.feishu.cn/docx/NpUlxxxxxxxxxxx)
-
-<at user_id="ou_all">所有人</at> 请查收</textarea>
+        <textarea class="editor" id="editor" data-od-id="editor" spellcheck="false" placeholder="写点什么，或直接粘贴图片…&#10;&#10;支持 Markdown 语法（**粗体**、[链接](https://…)、# 标题、> 引用、- 列表、`代码`）；&#10;需要 @ 某人：@所有人 或 <at user_id=&quot;ou_xxx&quot;>名字</at>"></textarea>
 
         <!-- Slash 命令菜单（原型：默认不显示） -->
         <div class="slash-menu" id="slashMenu">
@@ -428,7 +417,7 @@
             </svg>
           </div>
           <h4 class="name">青鸟</h4>
-          <div class="ver">v1.2.0 · build 20260905</div>
+          <div class="ver" id="aboutVersion">v0.1.0</div>
           <div class="quote">「蓬山此去无多路，青鸟殷勤为探看」</div>
         </div>
 
@@ -439,11 +428,11 @@
           </div>
           <div class="item">
             <b>运行时</b>
-            <span>Electron 30.1.0</span>
+            <span>Tauri</span>
           </div>
           <div class="item">
             <b>数据目录</b>
-            <span style="font-size:11px">~/Library/Application Support/qingniao</span>
+            <span style="font-size:11px">~/Library/Application Support/com.qingniao.app</span>
           </div>
           <div class="item">
             <b>最近更新</b>
@@ -452,15 +441,13 @@
         </div>
 
         <div class="about-links">
-          <a href="https://github.com/qingniao-app/qingniao" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px">
+          <a href="https://github.com/fxfboy/qingniao" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
             GitHub ↗
           </a>
-          <a href="#" onclick="return false">帮助文档 ↗</a>
-          <a href="#" onclick="return false">反馈问题 ↗</a>
-          <a href="#" onclick="return false">发行说明</a>
-          <a href="#" onclick="return false">开源许可</a>
-          <a href="#" onclick="return false">隐私政策</a>
+          <a href="https://github.com/fxfboy/qingniao/issues" target="_blank" rel="noopener">反馈问题 ↗</a>
+          <a href="https://github.com/fxfboy/qingniao/releases" target="_blank" rel="noopener">发行说明</a>
+          <a href="https://github.com/fxfboy/qingniao/blob/main/LICENSE" target="_blank" rel="noopener">开源许可</a>
         </div>
       </section>
     </div>
@@ -607,6 +594,7 @@
           <input type="text" placeholder="名称（如：测试群机器人）" />
           <input type="text" placeholder="签名密钥（没有可留空）" />
           <input type="text" class="full" placeholder="Webhook 地址 https://open.feishu.cn/open-apis/bot/v2/hook/…" />
+          <div class="form-error" id="addBotError" style="color:#EA6668;font-size:12px;margin-top:6px;min-height:0"></div>
           <div class="foot">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
             <span>签名密钥用于自动计算 sign，留空则不带签名</span>

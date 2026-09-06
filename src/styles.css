@@ -232,6 +232,13 @@
   }
   .history li .status{margin-top: 3px; font-size:11.5px; color: var(--ok)}
   .history li.err .status{color: var(--danger)}
+  /* 空状态提示：横向文本、水平垂直居中，避免落入 6px 轨道列而纵向排列 */
+  .history ul .empty{
+    display:flex; align-items:center; justify-content:center;
+    height:100%; min-height:120px;
+    color: var(--muted-2); font-size: 12px; padding: 16px;
+    cursor: default;
+  }
 
   /* Bottom bar: intent + send + result */
   .footer{
@@ -257,6 +264,19 @@
     font-family: var(--font-mono); font-size:11px;
     padding: 1px 6px; border-radius: 4px;
     background: oklch(1 0 0 / 0.22); color: white; letter-spacing: 0.5px;
+  }
+  /* 发送按钮禁用态（编辑器为空时） */
+  .send:disabled,
+  .send:disabled:hover{
+    background: var(--border-strong);
+    color: var(--muted);
+    box-shadow: none;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .send:disabled kbd{
+    background: oklch(0 0 0 / 0.08);
+    color: var(--muted);
   }
 
   .intent{
@@ -339,6 +359,7 @@
     border: 1px solid var(--border);
   }
   .hint kbd{font-family: var(--font-mono); font-size:10.5px; padding: 0 4px; background: var(--surface); border:1px solid var(--border); border-radius: 3px; color: var(--muted)}
+  .hint.hidden{display:none}
 
   /* Preview mode toggle (right side of toolbar) */
   .mode{
@@ -1030,6 +1051,10 @@
   }
   html[data-theme="dark"] .send:hover{
     box-shadow: 0 6px 20px oklch(0 0 0 / 0.55), inset 0 -2px 0 oklch(0 0 0 / 0.25);
+  }
+  html[data-theme="dark"] .send:disabled,
+  html[data-theme="dark"] .send:disabled:hover{
+    box-shadow: none;
   }
 
   /* 分段控件（identity/override/pref/mode）active 时的 ring —— 原来的白色阴影在暗色下几乎不可见 */
