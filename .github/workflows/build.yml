@@ -39,6 +39,9 @@ jobs:
     needs: check-version
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: 创建（或复用）Draft Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
