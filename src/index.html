@@ -9,11 +9,6 @@
 <body>
 <div class="app" data-od-id="app-shell">
 
-  <div class="titlebar" data-od-id="titlebar">
-    <div class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></div>
-    <div class="title">青鸟 · 飞书消息助手</div>
-  </div>
-
   <header class="appbar" data-od-id="appbar">
     <div class="logo" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -294,7 +289,7 @@
           <div class="field-head">
             <b>App ID</b><span class="req">*</span>
           </div>
-          <input type="text" value="cli_a1b2c3d4e5f60123" spellcheck="false" />
+          <input type="text" id="appIdInput" value="" spellcheck="false" />
           <div class="field-hint">在飞书开放平台 · 「凭证与基础信息」中获取，形如 <code>cli_xxxxxxxx</code></div>
         </div>
 
@@ -303,30 +298,20 @@
             <b>App Secret</b><span class="req">*</span>
             <button class="toggle" id="toggleSecret">显示</button>
           </div>
-          <input type="password" id="secretInput" value="ZAbCdEfGh1234567890IjKlMn" spellcheck="false" />
+          <input type="password" id="secretInput" value="" spellcheck="false" />
           <div class="field-hint">
             仅本地存储（macOS Keychain / Windows Credential Locker），不会上传到任何服务器。
-            <a href="#" onclick="return false">如何获取 →</a>
+            <a id="howToCredsLink" href="https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-app-id" target="_blank" rel="noopener">如何获取 →</a>
           </div>
         </div>
 
-        <div class="status-card">
+        <div class="status-card idle" id="connCard">
           <div class="row head">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-            <span>已连接 · TK 应用（tk-inner-bot）</span>
-            <span class="time">3 秒前校验</span>
+            <svg id="connIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+            <span id="connHeadTxt">未连接 · 填写凭证后点击「测试连接」</span>
+            <span class="time" id="connTime"></span>
           </div>
-          <div class="perm-grid">
-            <div class="perm">
-              <span class="pdot"></span>
-              <span class="name">im:message.image:upload</span>
-              <span class="ok-txt">已授权</span>
-            </div>
-            <div class="perm">
-              <span class="pdot"></span>
-              <span class="name">im:resource</span>
-              <span class="ok-txt">已授权</span>
-            </div>
+          <div class="perm-grid" id="connGrid" hidden>
             <div class="perm">
               <span class="pdot"></span>
               <span class="name">tenant_access_token</span>
@@ -334,18 +319,18 @@
             </div>
             <div class="perm">
               <span class="pdot"></span>
-              <span class="name">im:message.card:validate</span>
-              <span class="ok-txt">已授权</span>
+              <span class="name">bot:v3:info</span>
+              <span class="ok-txt">可访问</span>
             </div>
           </div>
         </div>
 
         <div class="action-row">
-          <button class="btn-secondary">
+          <button class="btn-secondary" id="testConnBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            重新测试连接
+            <span id="testConnLabel">测试连接</span>
           </button>
-          <button class="btn-link">前往飞书开放平台 ↗</button>
+          <button class="btn-link" id="openFeishuPlatform">前往飞书开放平台 ↗</button>
         </div>
       </section>
 
