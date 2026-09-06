@@ -53,7 +53,7 @@ jobs:
 
   # macOS：Apple Silicon (arm64)，只打 dmg，tauri-action 自动上传
   build-macos:
-    needs: create-release
+    needs: [create-release, check-version]
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -89,7 +89,7 @@ jobs:
 
   # Windows：不打包安装程序（不要 msi），只出便携 zip
   build-windows:
-    needs: create-release
+    needs: [create-release, check-version]
     runs-on: windows-latest
     steps:
       - name: Checkout
