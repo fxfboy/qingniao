@@ -169,6 +169,65 @@ fn upload_image(
     Ok(image_key)
 }
 
+/// 测试飞书应用凭证：换取 tenant_access_token 并读取机器人信息，返回应用名
+#[tauri::command]
+fn test_connection(app_id: String, app_secret: String) -> Result<String, String> {
+    let app_id = app_id.trim();
+    let app_secret = app_secret.trim();
+    if app_id.is_empty() || app_secret.is_empty() {
+        return Err("未配置飞书应用凭证（App ID / App Secret）".into());
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+    // 1. 获取 tenant_access_token
+    let token_resp = client
+        .post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
+        .json(&serde_json::json!({
+            "app_id": app_id,
+            "app_secret": app_secret
+        }))
+        .send()
+        .map_err(|e| format!("获取 token 请求失败: {e}"))?;
+    let token_json: serde_json::Value = token_resp
+        .json()
+        .map_err(|e| format!("token 响应解析失败: {e}"))?;
+    if token_json["code"].as_i64().unwrap_or(-1) != 0 {
+        return Err(format!(
+            "获取 token 失败: {} {}",
+            token_json["code"], token_json["msg"]
+        ));
+    }
+    let token = token_json["tenant_access_token"]
+        .as_str()
+        .ok_or("token 响应中缺少 tenant_access_token")?
+        .to_string();
+
+    // 2. 读取机器人信息，验证 token 可用并取应用名
+    let info_resp = client
+        .get("https://open.feishu.cn/open-apis/bot/v3/info")
+        .bearer_auth(&token)
+        .send()
+        .map_err(|e| format!("读取机器人信息失败: {e}"))?;
+    let info_json: serde_json::Value = info_resp
+        .json()
+        .map_err(|e| format!("机器人信息响应解析失败: {e}"))?;
+    if info_json["code"].as_i64().unwrap_or(-1) != 0 {
+        return Err(format!(
+            "连接失败: {} {}",
+            info_json["code"], info_json["msg"]
+        ));
+    }
+
+    Ok(info_json["bot"]["app_name"]
+        .as_str()
+        .unwrap_or("飞书应用")
+        .to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -177,7 +236,8 @@ pub fn run() {
             load_config,
             save_config,
             send_webhook,
-            upload_image
+            upload_image,
+            test_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

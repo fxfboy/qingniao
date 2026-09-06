@@ -513,14 +513,81 @@ $('#toggleSecret')?.addEventListener('click', () => {
   $('#toggleSecret').textContent = showing ? '显示' : '隐藏';
 });
 
+/* ---- 打开外部链接 ---- */
+async function openExternal(url){
+  if(invoke){
+    try{
+      await invoke('plugin:opener|open_url', { url });
+      return;
+    }catch(e){
+      console.error('打开链接失败:', e);
+    }
+  }
+  window.open(url, '_blank', 'noopener');
+}
+$('#howToCredsLink')?.addEventListener('click', e => {
+  e.preventDefault();
+  openExternal('https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-app-id');
+});
+$('#openFeishuPlatform')?.addEventListener('click', () => {
+  openExternal('https://open.feishu.cn/app');
+});
+
+/* ---- 测试连接 ---- */
+const connCard    = $('#connCard');
+const connIcon    = $('#connIcon');
+const connHeadTxt = $('#connHeadTxt');
+const connTime    = $('#connTime');
+const connGrid    = $('#connGrid');
+const testConnBtn = $('#testConnBtn');
+const testConnLabel = $('#testConnLabel');
+const CONN_ICON_OK   = '<path d="M20 6L9 17l-5-5"/>';
+const CONN_ICON_IDLE = '<path d="M5 12h14"/>';
+const CONN_ICON_ERR  = '<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>';
+function setConnCard(state, text, time){
+  connCard.classList.remove('idle','ok','err');
+  connCard.classList.add(state);
+  connIcon.innerHTML = state === 'ok' ? CONN_ICON_OK : state === 'err' ? CONN_ICON_ERR : CONN_ICON_IDLE;
+  connHeadTxt.textContent = text;
+  connTime.textContent = time || '';
+  connGrid.hidden = state !== 'ok';
+}
+function resetConnCard(){
+  setConnCard('idle', '未连接 · 填写凭证后点击「测试连接」');
+}
+let testingConn = false;
+async function runConnTest(){
+  if(testingConn) return;
+  const appId = $('#appIdInput').value.trim();
+  const appSecret = $('#secretInput').value.trim();
+  if(!appId || !appSecret){
+    setConnCard('err', '连接失败 · 请先填写 App ID 和 App Secret');
+    return;
+  }
+  testingConn = true;
+  testConnBtn.disabled = true;
+  testConnLabel.textContent = '测试中…';
+  try{
+    if(!invoke) throw 'Tauri 环境不可用';
+    const appName = await invoke('test_connection', {appId, appSecret});
+    setConnCard('ok', '已连接 · ' + appName, '刚刚校验');
+  }catch(e){
+    setConnCard('err', '连接失败 · ' + (typeof e === 'string' ? e : (e && e.message) || '未知错误'));
+  }finally{
+    testingConn = false;
+    testConnBtn.disabled = false;
+    testConnLabel.textContent = '测试连接';
+  }
+}
+testConnBtn.addEventListener('click', runConnTest);
+
 function loadConfigForm(){
-  const appIdInput = $('#paneApp input[type="text"]');
-  if(appIdInput) appIdInput.value = config.app_id || '';
+  $('#appIdInput').value = config.app_id || '';
   $('#secretInput').value = config.app_secret || '';
+  resetConnCard();
 }
 async function saveConfigForm(){
-  const appIdInput = $('#paneApp input[type="text"]');
-  config.app_id = appIdInput ? appIdInput.value.trim() : '';
+  config.app_id = $('#appIdInput').value.trim();
   config.app_secret = $('#secretInput').value.trim();
   await saveConfig();
 }

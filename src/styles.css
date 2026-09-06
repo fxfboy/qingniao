@@ -41,27 +41,8 @@
   /* ==== App shell ==== */
   .app{
     display: grid;
-    grid-template-rows: 40px auto 1fr auto;
+    grid-template-rows: auto 1fr auto;
     height: 100vh;
-  }
-
-  /* Traffic light bar (macOS look) */
-  .titlebar{
-    display:flex; align-items:center; gap:8px;
-    padding: 0 14px;
-    background: linear-gradient(180deg, oklch(0.98 0.003 220), oklch(0.955 0.005 220));
-    border-bottom: 1px solid var(--border);
-    user-select:none;
-  }
-  .traffic{display:flex; gap:8px}
-  .traffic i{width:12px;height:12px;border-radius:50%;display:block}
-  .traffic i.r{background:#ff5f57}
-  .traffic i.y{background:#febc2e}
-  .traffic i.g{background:#28c840}
-  .titlebar .title{
-    position:absolute; left:0; right:0;
-    text-align:center; font-size:13px; color: var(--muted);
-    pointer-events:none;
   }
 
   /* Header */
@@ -561,8 +542,19 @@
   .status-card .row.head{font-weight: 600; font-size: 13px}
   .status-card .row svg{width:13px; height:13px; flex-shrink: 0}
   .status-card .row .time{color: oklch(0.52 0.05 155); font-variant-numeric: tabular-nums; margin-left: auto; font-size: 11.5px}
+  .status-card.idle{
+    background: var(--surface-soft);
+    border-color: var(--border);
+  }
+  .status-card.idle .row{color: var(--muted)}
+  .status-card.err{
+    background: linear-gradient(180deg, oklch(0.97 0.03 25), oklch(0.995 0.012 25));
+    border-color: oklch(0.88 0.06 25);
+  }
+  .status-card.err .row{color: oklch(0.45 0.16 25)}
 
   .perm-grid{display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px}
+  .perm-grid[hidden]{display: none}
   .perm{
     display: flex; align-items: center; gap: 8px;
     padding: 8px 10px; border: 1px solid var(--border);
@@ -981,9 +973,6 @@
   }
 
   /* 标题栏 / 底栏渐变 —— 原来是浅灰渐变 */
-  html[data-theme="dark"] .titlebar{
-    background: linear-gradient(180deg, oklch(0.22 0.012 240), oklch(0.2 0.012 240));
-  }
   html[data-theme="dark"] .footer{
     background: linear-gradient(180deg, transparent, oklch(0.2 0.012 240));
   }
@@ -1008,6 +997,16 @@
   }
   html[data-theme="dark"] .status-card .row{color: oklch(0.9 0.1 155)}
   html[data-theme="dark"] .status-card .row .time{color: oklch(0.72 0.06 155)}
+  html[data-theme="dark"] .status-card.idle{
+    background: var(--surface-soft);
+    border-color: var(--border);
+  }
+  html[data-theme="dark"] .status-card.idle .row{color: var(--muted)}
+  html[data-theme="dark"] .status-card.err{
+    background: linear-gradient(180deg, oklch(0.3 0.06 25), oklch(0.27 0.05 25));
+    border-color: oklch(0.45 0.09 25);
+  }
+  html[data-theme="dark"] .status-card.err .row{color: oklch(0.88 0.09 25)}
 
   /* 智能识别 warn 变体 */
   html[data-theme="dark"] .intent.warn{
