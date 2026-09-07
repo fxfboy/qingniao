@@ -12,6 +12,31 @@ const uid = () => 'a' + (++attIdSeq) + '_' + Date.now().toString(36);
 const invoke = window.__TAURI__ ? window.__TAURI__.core.invoke : null;
 if(!invoke){ console.warn('Tauri 不可用，部分功能将降级'); }
 
+/* ===================== 日志 ===================== */
+// 写入 <配置目录>/qingniao.log（与配置文件同目录），同时输出到控制台
+async function log(level, msg){
+  try{
+    const line = '[青鸟] ' + msg;
+    if(level === 'error') console.error(line);
+    else if(level === 'warn') console.warn(line);
+    else console.log(line);
+  }catch(e){}
+  if(invoke){
+    try{ await invoke('log_event', {level, message: msg}); }
+    catch(e){ console.error('写入日志文件失败:', e); }
+  }
+}
+// 捕获前端未处理异常，一并写入日志
+window.addEventListener('error', e => {
+  const msg = e.message || (e.error && e.error.stack) || '未知错误';
+  log('error', '未捕获异常: ' + msg);
+});
+window.addEventListener('unhandledrejection', e => {
+  const r = e.reason;
+  const msg = (r && (r.message || r.stack)) || String(r) || '未知原因';
+  log('error', '未处理的 Promise 拒绝: ' + msg);
+});
+
 /* ===================== 状态 ===================== */
 let config = null;
 let attachments = [];
@@ -20,6 +45,7 @@ let attIdSeq = 0;
 
 /* ===================== DOM 引用 ===================== */
 const editor    = $('#editor');
+const hintEl    = $('.hint');
 const attStrip  = $('#attachments');
 const counter   = $('#counter');
 const typePill  = $('#typePill');
@@ -36,6 +62,7 @@ async function loadConfig(){
       config = await invoke('load_config');
     }catch(e){
       console.error('加载配置失败:', e);
+      log('error', '加载配置失败: ' + (e.message || e));
       config = defaultConfig();
     }
   } else {
@@ -55,7 +82,7 @@ function defaultConfig(){
 async function saveConfig(){
   if(invoke){
     try{ await invoke('save_config', {config}); }
-    catch(e){ console.error('保存配置失败:', e); }
+    catch(e){ console.error('保存配置失败:', e); log('error', '保存配置失败: ' + (e.message || e)); }
   }
 }
 
@@ -97,11 +124,39 @@ function mdToPost(md, attImageKeys){
   const lines = md.split('\n');
   let title = '';
   const content = [];
+  let inCodeBlock = false;
+  let codeLines = [];
   for(const line of lines){
+    // 代码块边界
+    if(line.trim().startsWith('```')){
+      if(inCodeBlock){
+        // 结束代码块：逐行输出为纯文本（飞书 webhook post 不支持 code 标签）
+        for(const cl of codeLines){
+          content.push([{tag:'text', text: cl || ' '}]);
+        }
+        codeLines = [];
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    if(inCodeBlock){ codeLines.push(line); continue; }
+    // 标题
     if(!title && line.startsWith('# ')){ title = line.slice(2).trim(); continue; }
     if(line.trim() === '') continue;
-    const inline = parseInline(line);
+    // 引用块：去掉行首的 > 和空格
+    let processed = line;
+    if(processed.startsWith('> ')) processed = processed.slice(2);
+    else if(processed.startsWith('>')) processed = processed.slice(1);
+    const inline = parseInline(processed);
     if(inline.length) content.push(inline);
+  }
+  // 处理未闭合的代码块
+  if(inCodeBlock && codeLines.length){
+    for(const cl of codeLines){
+      content.push([{tag:'text', text: cl || ' '}]);
+    }
   }
   for(const key of attImageKeys) content.push([{tag:'img', image_key:key}]);
   return {msg_type:'post', content:{post:{zh_cn:{title, content}}}};
@@ -126,6 +181,8 @@ function detect(text, attCount){
 function refreshIntent(){
   const t = editor.value;
   counter.textContent = t.replace(/\s/g,'').length + ' 字';
+  hintEl.classList.toggle('hidden', !!t.trim());
+  sendBtn.disabled = !t.trim() && attachments.length === 0;
   const d = detect(t, attachments.length);
   const finalType = forcedType === 'auto' ? d.t : forcedType;
   typePill.className = 'type-pill ' + (finalType === 'interactive' ? 'card' : finalType);
@@ -142,7 +199,28 @@ function refreshIntent(){
 /* ===================== 消息组装 ===================== */
 function extractCardJson(text){
   let t = text.trim().replace(/^```card\s*/i,'').replace(/```\s*$/,'').trim();
-  return JSON.parse(t);
+  try {
+    return JSON.parse(t);
+  } catch(e) {
+    // 普通文本自动包装为基础卡片：第一行作标题，其余作正文
+    const lines = text.trim().split('\n').filter(l => l.trim() !== '');
+    const card = {
+      config: {wide_screen_mode: true},
+      elements: []
+    };
+    if(lines.length){
+      const title = lines[0];
+      const body = lines.slice(1).join('\n');
+      card.header = {
+        title: {tag: 'plain_text', content: title},
+        template: 'blue'
+      };
+      if(body){
+        card.elements.push({tag: 'div', text: {tag: 'lark_md', content: body}});
+      }
+    }
+    return card;
+  }
 }
 function buildPayload(text, type){
   const imgKeys = attachments.filter(a => a.imageKey).map(a => a.imageKey);
@@ -152,26 +230,38 @@ function buildPayload(text, type){
     case 'image':
       if(!imgKeys.length) throw new Error('没有可用的 image_key，请等待图片上传完成');
       return {msg_type:'image', content:{image_key:imgKeys[0]}};
-    case 'interactive':
-      return {msg_type:'interactive', card: extractCardJson(text)};
+    case 'interactive': {
+      const card = extractCardJson(text);
+      // 把图片附件作为 img 元素追加到卡片，避免手动选交互卡片时图片丢失
+      if(imgKeys.length && Array.isArray(card.elements)){
+        for(const key of imgKeys){
+          card.elements.push({
+            tag: 'img',
+            img_key: key,
+            alt: {tag: 'plain_text', content: '图片'}
+          });
+        }
+      }
+      return {msg_type:'interactive', card};
+    }
   }
 }
 
 /* ===================== 发送 ===================== */
 async function send(){
   const bot = config.webhooks[config.last_webhook];
-  if(!bot){ setResult(false,'未配置机器人'); return; }
+  if(!bot){ setResult(false,'未配置机器人'); log('warn', '发送被拒绝: 未配置机器人'); return; }
   const text = editor.value;
   const d = detect(text, attachments.length);
   const type = forcedType === 'auto' ? d.t : forcedType;
-  if(type !== 'image' && !text.trim() && attachments.length === 0){ setResult(false,'内容为空'); return; }
+  if(type !== 'image' && !text.trim() && attachments.length === 0){ setResult(false,'内容为空'); log('warn', '发送被拒绝: 内容为空'); return; }
 
   const uploading = attachments.filter(a => a.status === 'uploading');
-  if(uploading.length){ setResult(false,'图片仍在上传中，请稍候'); return; }
+  if(uploading.length){ setResult(false,'图片仍在上传中，请稍候'); log('warn', '发送被拒绝: 图片仍在上传中'); return; }
 
   let payload;
   try{ payload = buildPayload(text, type); }
-  catch(e){ setResult(false,'消息组装失败：'+e.message); return; }
+  catch(e){ setResult(false,'消息组装失败：'+e.message); log('error', '消息组装失败: ' + e.message); return; }
 
   if(bot.secret){
     const ts = Math.floor(Date.now()/1000).toString();
@@ -182,6 +272,7 @@ async function send(){
   sendBtn.disabled = true; sendBtn.style.opacity = '0.6';
   setResult(null,'发送中…');
   const t0 = performance.now();
+  log('info', 'send: 开始发送 type=' + type + ' 机器人=' + (bot.name || '?'));
 
   try{
     let respText;
@@ -205,12 +296,15 @@ async function send(){
       else if(j.code !== undefined){ ok = false; msg = j.code + ' ' + (j.msg||''); }
     }catch(e){}
     setResult(ok, msg + ' · ' + dt + 'ms');
+    log(ok ? 'info' : 'error', 'send: 完成 type=' + type + ' ' + msg + ' · ' + dt + 'ms');
     addHistory({time: fmtTime(new Date()), msg_type: type, summary: makePreview(text, type), ok, status: msg, payload});
   }catch(e){
     setResult(false,'发送失败：'+e.message);
+    log('error', 'send: 发送失败 ' + (e.message || e));
     addHistory({time: fmtTime(new Date()), msg_type: type, summary: makePreview(text, type), ok:false, status:'发送失败', payload:{}});
   }finally{
-    sendBtn.disabled = false; sendBtn.style.opacity = '';
+    sendBtn.style.opacity = '';
+    sendBtn.disabled = !editor.value.trim() && attachments.length === 0;
   }
 }
 function makePreview(text, type){
@@ -246,7 +340,7 @@ function fmtTime(d){
 function renderHistory(){
   historyUl.innerHTML = '';
   if(!config.history.length){
-    historyUl.innerHTML = '<li style="color:var(--muted-2);font-size:12px;padding:16px;text-align:center">暂无发送记录</li>';
+    historyUl.innerHTML = '<li class="empty">暂无发送记录</li>';
     return;
   }
   const typeMap = {text:'文本', post:'富文本', image:'图片', interactive:'交互卡片'};
@@ -287,7 +381,10 @@ function renderAttachments(){
     let stateHtml = '';
     if(att.status === 'uploading') stateHtml = '<span class="state"><span class="sd"></span>上传中…</span>';
     else if(att.status === 'done') stateHtml = '<span class="state"><span class="sd"></span>'+esc((att.imageKey||'').slice(0,12)+'…')+'</span>';
-    else if(att.status === 'error') stateHtml = '<span class="state"><span class="sd"></span>点击手动填 key</span>';
+    else if(att.status === 'error'){
+      const errMsg = (att.error || '上传失败').slice(0, 36);
+      stateHtml = '<span class="state" title="'+esc(att.error||'')+'"><span class="sd"></span>'+esc(errMsg)+'</span>';
+    }
     else stateHtml = '<span class="state"><span class="sd"></span>待上传</span>';
     div.innerHTML = '<span class="badge">'+esc(att.name)+'</span>'+stateHtml+'<button class="rm" aria-label="移除附件">×</button>';
     div.addEventListener('click', (e) => {
@@ -305,6 +402,7 @@ function addAttachment(file, dataUrl){
   const att = {id: uid(), name: file.name || 'pasted.png', dataUrl, imageKey:'', status:'uploading', error:''};
   attachments.push(att);
   renderAttachments(); refreshIntent();
+  log('info', '附件已添加: ' + att.name + ' (' + Math.round((file.size||0)/1024) + ' KB, dataUrl ' + Math.round(dataUrl.length/1024) + ' KB)');
   uploadAttachment(att);
 }
 function removeAttachment(id){
@@ -313,6 +411,7 @@ function removeAttachment(id){
 }
 async function uploadAttachment(att){
   if(invoke && config.app_id && config.app_secret){
+    log('info', 'uploadAttachment: 开始上传 ' + att.name);
     try{
       const base64 = att.dataUrl.split(',')[1];
       const key = await invoke('upload_image', {
@@ -320,14 +419,17 @@ async function uploadAttachment(att){
         appId: config.app_id, appSecret: config.app_secret
       });
       att.imageKey = key; att.status = 'done';
+      log('info', 'uploadAttachment: 上传成功 ' + att.name + ' → ' + key);
     }catch(e){
       att.status = 'error'; att.error = e.message;
+      log('error', 'uploadAttachment: 上传失败 ' + att.name + ' → ' + (e.message || e));
     }
   } else {
     // 无 Tauri 或未配置应用凭证：降级为手动填 key
     await new Promise(r => setTimeout(r, 800));
     att.status = 'error';
     att.error = '未配置飞书应用凭证';
+    log('warn', 'uploadAttachment: ' + att.name + ' 未配置飞书应用凭证，降级为手动填写 image_key');
   }
   renderAttachments(); refreshIntent();
 }
@@ -459,7 +561,13 @@ $('#botList').addEventListener('click', async (e) => {
 document.querySelector('.add-bot-form .btn-primary')?.addEventListener('click', async () => {
   const inputs = $$('.add-bot-form input');
   const name = inputs[0].value.trim(), secret = inputs[1].value.trim(), url = inputs[2].value.trim();
-  if(!name || !url){ alert('请填写名称和 Webhook 地址'); return; }
+  const errEl = document.getElementById('addBotError');
+  if(!name || !url){
+    if(errEl){ errEl.textContent = '请填写名称和 Webhook 地址'; errEl.style.minHeight = '16px'; }
+    setTimeout(() => { if(errEl){ errEl.textContent = ''; errEl.style.minHeight = '0'; } }, 3000);
+    return;
+  }
+  if(errEl){ errEl.textContent = ''; errEl.style.minHeight = '0'; }
   config.webhooks.push({name, secret, url});
   await saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
   inputs.forEach(i => i.value = '');
@@ -521,6 +629,7 @@ async function openExternal(url){
       return;
     }catch(e){
       console.error('打开链接失败:', e);
+      log('error', '打开外部链接失败: ' + (e.message || e));
     }
   }
   window.open(url, '_blank', 'noopener');
@@ -572,7 +681,9 @@ async function runConnTest(){
     const appName = await invoke('test_connection', {appId, appSecret});
     setConnCard('ok', '已连接 · ' + appName, '刚刚校验');
   }catch(e){
-    setConnCard('err', '连接失败 · ' + (typeof e === 'string' ? e : (e && e.message) || '未知错误'));
+    const msg = typeof e === 'string' ? e : (e && e.message) || '未知错误';
+    setConnCard('err', '连接失败 · ' + msg);
+    log('error', 'test_connection: 连接失败 ' + msg);
   }finally{
     testingConn = false;
     testConnBtn.disabled = false;
@@ -585,6 +696,10 @@ function loadConfigForm(){
   $('#appIdInput').value = config.app_id || '';
   $('#secretInput').value = config.app_secret || '';
   resetConnCard();
+  // 已有凭证时自动后台测试连接，恢复上次状态
+  if(config.app_id && config.app_secret){
+    setTimeout(runConnTest, 150);
+  }
 }
 async function saveConfigForm(){
   config.app_id = $('#appIdInput').value.trim();
@@ -737,6 +852,12 @@ async function init(){
   refreshIntent();
   setResult(null, '就绪');
   setTimeout(() => { const s = resultEl.querySelector('span:nth-child(2)'); if(s) s.innerHTML = '等待发送'; }, 100);
+  // 动态填充关于页版本号
+  try {
+    const ver = await window.__TAURI__.app.getVersion();
+    const el = document.getElementById('aboutVersion');
+    if(el && ver) el.textContent = 'v' + ver;
+  } catch(e) {}
 }
 init();
 

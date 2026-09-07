@@ -66,7 +66,9 @@ npm run tauri build   # 构建安装包
 - 发图片需先通过飞书自建应用「上传图片」接口（`POST /open-apis/im/v1/images`）拿到 `image_key`，再填入青鸟发送。
 - 发文件可将文件上传到云空间后，把分享链接放进文本 / 富文本消息。
 
-## 配置存储位置
+## 配置与日志存储位置
 
-- macOS：`~/Library/Application Support/com.qingniao.app/qingniao.json`
-- Windows：`%APPDATA%\com.qingniao.app\qingniao.json`
+- macOS：`~/Library/Application Support/qingniao/qingniao.json`
+- Windows：`%APPDATA%\qingniao\qingniao.json`
+
+应用运行日志写在**同目录**的 `qingniao.log`（与配置文件同目录），记录配置读写、消息发送、图片上传、连接测试等关键操作与错误；前端未捕获的异常也会写入。日志中 app_id 与 webhook 密钥均做了脱敏，不会记录明文密钥。
