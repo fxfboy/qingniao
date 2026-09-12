@@ -51,7 +51,15 @@ cd "${ROOT_DIR}"
 
 echo "==> 开始同步飞书文档到 ${DOCS_DIR}（身份：${LARK_AS}）"
 
+# 先导出到临时文件再与本地比对：本地版与飞书不同就先备份，避免静默覆盖本地改动。
+# 背景：2026-09-18 事故——「只改本地、待回贴飞书」的两次编辑
+# （Agent-CLI-方案 v3、dock-tray 常驻功能设计文档 v0.6）被一次全量同步无提示覆盖，
+# docs/ 又在 .gitignore 内，没有 git 历史可恢复，只能靠编辑器 file-history 抢救。
+BACKUP_DIR="${DOCS_DIR}/.bak"
+TMP_NAME="_qn-sync-tmp.md"
+
 ok_count=0
+backup_count=0
 for entry in "${DOC_MAP[@]}"; do
   name="${entry%%|*}"
   url="${entry##*|}"
@@ -71,15 +79,27 @@ for entry in "${DOC_MAP[@]}"; do
       --token "${token}" \
       --doc-type "${doc_type}" \
       --file-extension markdown \
-      --file-name "${name}.md" \
+      --file-name "${TMP_NAME}" \
       --output-dir docs \
       --overwrite \
       --as "${LARK_AS}" 2>&1); then
+    target="${DOCS_DIR}/${name}.md"
+    if [[ -f "${target}" ]] && ! cmp -s "${DOCS_DIR}/${TMP_NAME}" "${target}"; then
+      mkdir -p "${BACKUP_DIR}"
+      cp -p "${target}" "${BACKUP_DIR}/${name}.$(date +%Y%m%d-%H%M%S).md"
+      backup_count=$((backup_count + 1))
+      echo "    [备份] 本地版与飞书不一致，旧版已存到 docs/.bak/"
+    fi
+    mv "${DOCS_DIR}/${TMP_NAME}" "${target}"
     ok_count=$((ok_count + 1))
   else
     # 打印真实报错，否则出问题只能看到「导出失败」
     echo "    [失败] ${name}：$(printf '%s' "${err}" | tr '\n' ' ' | cut -c1-300)" >&2
   fi
 done
+rm -f "${DOCS_DIR}/${TMP_NAME}"
 
 echo "==> 同步完成：${ok_count}/${#DOC_MAP[@]} 份文档已更新"
+if (( backup_count > 0 )); then
+  echo "==> 有 ${backup_count} 份本地版与飞书不同，已备份到 ${BACKUP_DIR}（确认无用后可删）"
+fi
