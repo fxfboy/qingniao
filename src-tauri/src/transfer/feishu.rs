@@ -315,23 +315,89 @@ pub fn webhook_sign(secret: &str, ts: &str) -> String {
     B64.encode(mac.finalize().into_bytes())
 }
 
-/// 组装「仅链接」富文本 post（D3）：a 标签 href=取回链接
-pub fn build_transfer_post(file_name: &str, size: u64, link: &str) -> Value {
+/// 组装「仅链接」交互式卡片（D3：仅链接，载体由富文本 post 改为 interactive card）：
+/// 头部标题 + 文件图标/文件名（超链接指向取回链接）+ 取回按钮 + 分界线 + note footer（发送时间/过期提示 + 端限制提示）。
+/// `ts` = payload 的发送时间（UTC Unix 秒，§7.2），与新鲜度窗口同源，避免展示值与实际过期时刻不一致。
+pub fn build_transfer_card(file_name: &str, size: u64, link: &str, ts: i64) -> Value {
+    let icon = file_icon(file_name);
+    let minutes = crate::transfer::crypto::FRESHNESS_WINDOW_MINUTES;
     serde_json::json!({
-        "msg_type": "post",
-        "content": { "post": { "zh_cn": {
-            "title": "📎 文件传输",
-            "content": [[
-                {"tag":"text","text": format!("{}\n", file_name)},
-                {"tag":"a","text":"点击取回","href": link},
-                {"tag":"text","text": format!(
-                    "（{} · 链接 {} 分钟内有效）",
-                    human_size(size),
-                    crate::transfer::crypto::FRESHNESS_WINDOW_MINUTES
-                )}
-            ]]
-        }}}
+        "msg_type": "interactive",
+        "card": {
+            "config": { "wide_screen_mode": true },
+            "header": {
+                "template": "blue",
+                "title": { "tag": "plain_text", "content": "文件传输" }
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": { "tag": "lark_md", "content": format!(
+                        "{icon} **[{file_name}]({link})**\n<font color='grey'>{}</font>",
+                        human_size(size)
+                    )}
+                },
+                {
+                    "tag": "action",
+                    "actions": [{
+                        "tag": "button",
+                        "type": "primary",
+                        "text": { "tag": "plain_text", "content": "点击取回" },
+                        "url": link
+                    }]
+                },
+                { "tag": "hr" },
+                {
+                    "tag": "note",
+                    "elements": [{ "tag": "plain_text", "content": format!(
+                        "⏳ 发送时间 {} · 链接 {minutes} 分钟内有效，过期后请重新发送",
+                        fmt_local_time(ts)
+                    )}]
+                },
+                {
+                    "tag": "note",
+                    "elements": [{ "tag": "plain_text", "content":
+                        "💻 取回只能在安装了青鸟的电脑上完成，手机端不支持"
+                    }]
+                }
+            ]
+        }
     })
+}
+
+/// Unix 秒 → 本地时区 `YYYY-MM-DD HH:MM:SS`。
+/// 取不到本地偏移时回落 UTC（与 `lib.rs` 的 `now_str` 同口径）。
+fn fmt_local_time(unix: i64) -> String {
+    let Ok(t) = time::OffsetDateTime::from_unix_timestamp(unix) else {
+        return String::new();
+    };
+    let t = t.to_offset(time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC));
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        t.year(),
+        t.month() as u8,
+        t.day(),
+        t.hour(),
+        t.minute(),
+        t.second()
+    )
+}
+
+/// 按扩展名给出文件图标（无法识别时用回形针）
+fn file_icon(file_name: &str) -> &'static str {
+    let ext = file_name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz") => "🗜️",
+        Some("pdf") => "📕",
+        Some("doc" | "docx" | "rtf") => "📘",
+        Some("xls" | "xlsx" | "csv" | "ods") => "📗",
+        Some("ppt" | "pptx" | "key") => "📙",
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" | "heic") => "🖼️",
+        Some("mp4" | "mov" | "avi" | "mkv" | "webm") => "🎬",
+        Some("mp3" | "wav" | "flac" | "aac" | "m4a") => "🎵",
+        Some("txt" | "md" | "log" | "json" | "xml" | "yaml" | "yml" | "toml") => "📄",
+        _ => "📎",
+    }
 }
 
 fn human_size(b: u64) -> String {
@@ -380,12 +446,46 @@ mod tests {
     }
 
     #[test]
-    fn transfer_post_contains_link_only() {
-        let v = build_transfer_post("a.zip", 2048, "http://127.0.0.1:9876/dl?t=xyz");
+    fn transfer_card_contains_link_only() {
+        let v = build_transfer_card("a.zip", 2048, "http://127.0.0.1:9876/dl?t=xyz", 1_700_000_000);
         let text = v.to_string();
         assert!(text.contains("http://127.0.0.1:9876/dl?t=xyz"));
         assert!(text.contains("2 KB"));
-        assert!(text.contains("\"post\""));
+        assert_eq!(v["msg_type"], "interactive");
+        // 文件名以超链接形式出现，且带文件图标
+        assert!(text.contains("**[a.zip](http://127.0.0.1:9876/dl?t=xyz)**"));
+        assert!(text.contains("🗜️"));
+        // footer：发送时间 + 10 分钟过期提示
+        assert!(text.contains("发送时间"));
+        assert!(text.contains("10 分钟内有效"));
+        // 端限制提示：手机端不支持，须在装了青鸟的电脑上取回
+        assert!(text.contains("取回只能在安装了青鸟的电脑上完成，手机端不支持"));
+        assert_eq!(v["card"]["elements"][1]["actions"][0]["url"], "http://127.0.0.1:9876/dl?t=xyz");
+        // 结构：0 文件信息 div → 1 取回按钮 → 2 分界线 → 3/4 两条 note
+        assert_eq!(v["card"]["elements"][2]["tag"], "hr");
+        assert_eq!(v["card"]["elements"][3]["tag"], "note");
+        assert_eq!(v["card"]["elements"][4]["tag"], "note");
+    }
+
+    #[test]
+    fn fmt_local_time_shape_is_stable() {
+        // 不依赖本机时区：只校验形状 YYYY-MM-DD HH:MM:SS
+        let s = fmt_local_time(1_700_000_000);
+        assert_eq!(s.len(), 19, "{s}");
+        assert_eq!(&s[4..5], "-");
+        assert_eq!(&s[10..11], " ");
+        assert_eq!(&s[13..14], ":");
+        assert_eq!(&s[16..17], ":");
+        assert!(s.chars().filter(char::is_ascii_digit).count() >= 14);
+        // 越界时间戳不 panic，退化为空串
+        assert!(fmt_local_time(i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn file_icon_falls_back_to_clip() {
+        assert_eq!(file_icon("no-extension"), "📎");
+        assert_eq!(file_icon("a.unknownext"), "📎");
+        assert_eq!(file_icon("A.ZIP"), "🗜️");
     }
 
     #[test]
