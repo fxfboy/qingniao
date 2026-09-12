@@ -66,6 +66,20 @@ npm run tauri build   # 构建安装包
 - 发图片需先通过飞书自建应用「上传图片」接口（`POST /open-apis/im/v1/images`）拿到 `image_key`，再填入青鸟发送。
 - 发文件可将文件上传到云空间后，把分享链接放进文本 / 富文本消息。
 
+## Agent CLI（qingniao 命令行）
+
+让 AI Agent 通过命令行发送消息，与 APP 共用同一套消息组装核心（行为逐字一致）：
+
+- **安装**：APP「配置 → Agent」一键安装（符号链接到 `~/.local/bin/qingniao`，Windows 复制到
+  `%LOCALAPPDATA%\qingniao\bin\`）；或在 Release 下载 `qingniao-<版本>-<平台>.zip`，
+  解压后把 `qingniao` 放进 PATH
+- **技能**：APP「配置 → Agent」一键同步到 `~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`；
+  或由 Agent 自行执行 `npx skills add fxfboy/qingniao`
+- **文档**：`skills/qingniao/SKILL.md`（命令、`--json` 契约、退出码、URL 安全策略）
+
+> macOS 单独下载的 CLI 未做签名（unsigned），首次运行如被 Gatekeeper 拦截：
+> `xattr -d com.apple.quarantine $(which qingniao)`
+
 ## 配置与日志存储位置
 
 - macOS：`~/Library/Application Support/qingniao/qingniao.json`
