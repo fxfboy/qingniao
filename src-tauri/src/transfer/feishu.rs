@@ -324,7 +324,11 @@ pub fn build_transfer_post(file_name: &str, size: u64, link: &str) -> Value {
             "content": [[
                 {"tag":"text","text": format!("{}\n", file_name)},
                 {"tag":"a","text":"点击取回","href": link},
-                {"tag":"text","text": format!("（{} · 链接 30 分钟内有效）", human_size(size))}
+                {"tag":"text","text": format!(
+                    "（{} · 链接 {} 分钟内有效）",
+                    human_size(size),
+                    crate::transfer::crypto::FRESHNESS_WINDOW_MINUTES
+                )}
             ]]
         }}}
     })

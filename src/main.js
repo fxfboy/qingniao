@@ -59,7 +59,6 @@ window.addEventListener('unhandledrejection', e => {
 
 /* ===================== 状态 ===================== */
 let config = null;
-let attSeq = 0;                 // chip / 记录序号
 let hotkeyMode = 'mod';         // 'mod' | 'enter'
 let pendingFile = null;         // 确认弹窗中的待发文件 {path, name, size}
 let liveTasks = new Map();      // task_id -> {record, el}
@@ -290,15 +289,35 @@ function insertNode(el, node){
   syncEmpty(el); refresh();
 }
 const TONES = ['', 'b', 'c'];
+/* 输入框内的图片附件：直接放 <img> 大图预览（对标飞书输入框）。
+ * 之前用 44px 方形 background-image，截图这种宽图被 cover 裁得只剩中间一小块，
+ * 等于看不见；这里按原图比例定尺寸，完整显示 */
+const CHIP_MAX_W = 200, CHIP_MAX_H = 140, CHIP_MIN = 44;
+function sizeChipThumb(img){
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (!w || !h) return;
+  const s = Math.min(CHIP_MAX_W / w, CHIP_MAX_H / h, 1);
+  img.style.width = Math.max(CHIP_MIN, Math.round(w * s)) + 'px';
+  img.style.height = Math.max(CHIP_MIN, Math.round(h * s)) + 'px';
+}
 function insertChip(el, name, dataUrl){
   const chip = document.createElement('span');
   chip.className = 'chip';
   chip.setAttribute('contenteditable', 'false');
   chip.setAttribute('data-name', name);
-  chip.innerHTML = '<span class="cthumb ' + TONES[attSeq++ % 3] + '"></span><span class="cnm"></span>' +
+  chip.innerHTML = '<img class="cimg" alt="" draggable="false">' +
+                   '<span class="cnm"></span>' +
                    '<button class="cx" type="button" aria-label="移除这张图片">×</button>';
   chip.querySelector('.cnm').textContent = name;
-  if (dataUrl) chip.querySelector('.cthumb').style.backgroundImage = 'url(' + dataUrl + ')';
+  const img = chip.querySelector('.cimg');
+  if (dataUrl){
+    img.onload = () => sizeChipThumb(img);
+    img.onerror = () => { img.classList.add('bad'); chip.title = '这张图无法预览（仍会按原图发出）'; };
+    img.src = dataUrl;
+    if (img.complete) sizeChipThumb(img);   // 已解码完成时 load 不会再触发
+  } else {
+    img.classList.add('bad');
+  }
   chip._dataUrl = dataUrl || '';
   insertNode(el, chip);
   uploadChip(chip);
@@ -342,14 +361,16 @@ function collectEd(el){
   return {text, chips, imgKeys, pending};
 }
 
-/* 生成小尺寸缩略图 dataURL（用于历史记录展示，避免完整图片撑大本地配置） */
+/* 生成缩略图 dataURL（用于历史记录展示，避免完整图片撑大本地配置）。
+ * 边长取 256：历史里单图格子最宽 340px，96px 被放大后明显发虚（M3 后历史图片回显看不清） */
+const THUMB_MAX = 256;
 function makeThumb(dataUrl){
   return new Promise(res => {
     if(!dataUrl){ res(''); return; }
     const img = new Image();
     img.onload = () => {
       try{
-        const s = Math.min(1, 96 / Math.max(img.width, img.height));
+        const s = Math.min(1, THUMB_MAX / Math.max(img.width, img.height));
         const c = document.createElement('canvas');
         c.width = Math.max(1, Math.round(img.width * s));
         c.height = Math.max(1, Math.round(img.height * s));
@@ -473,20 +494,37 @@ function whoLine(rec){
 function botAv(){ return '<div class="av bot" aria-hidden="true">' + BIRD + '</div>'; }
 function personAv(){ return '<div class="av person" aria-hidden="true">取</div>'; }
 
+/* 图片元数据定位：M3（前端改调 Rust core）起媒体信息由 extra.media 嵌套落盘，
+ * 而 v0.4 及更早的记录是顶层 image_names/img_keys/thumbs —— 两种都要认 */
+function recMedia(rec){
+  const m = rec && rec.media;
+  if (m && typeof m === 'object' &&
+      (Array.isArray(m.image_names) || Array.isArray(m.img_keys) || Array.isArray(m.thumbs))){
+    return m;
+  }
+  return rec || {};
+}
 function bubbleHtml(rec){
   const kind = rec.kind;
   if (kind === 'text'){
     return '<div class="bubble plain">' + renderTextHtml(rec.text || rec.summary) + '</div>';
   }
   if (kind === 'image'){
-    const names = rec.image_names || [];
-    const thumbs = rec.thumbs || [];
-    const tiles = names.map((n,i) => thumbs[i]
+    const media = recMedia(rec);
+    const names = Array.isArray(media.image_names) ? media.image_names.slice() : [];
+    const thumbs = Array.isArray(media.thumbs) ? media.thumbs : [];
+    const keys = Array.isArray(media.img_keys) ? media.img_keys : [];
+    let n = Math.max(names.length, thumbs.length, keys.length);
+    // CLI 发送 / 更早的记录没有媒体元数据，但 payload 里一定有 image_key
+    if (!n && rec.payload && rec.payload.content && rec.payload.content.image_key) n = 1;
+    if (!n) return '<div class="bubble plain">' + renderTextHtml(rec.summary || '(空)') + '</div>';
+    while (names.length < n) names.push('');
+    const tiles = names.map((n2,i) => thumbs[i]
       ? '<div class="thumb ' + TONES[i%3] + ' timg" style="background-image:url(' + thumbs[i] + ')"></div>'
-      : '<div class="thumb ' + TONES[i%3] + '"><span class="tn">' + esc(n) + '</span></div>').join('');
-    return '<div class="bubble"><div class="bub-head img">' + names.length + ' 张图片<span class="htype">图片 · image</span></div>' +
-      '<div class="img-grid' + (names.length === 1 ? ' one' : '') + '">' + tiles + '</div>' +
-      '<div class="bub-foot"><span class="ok">' + OK_ICO + '已发送 · ' + names.length + ' 张图</span><span>image_key 已换取</span></div></div>';
+      : '<div class="thumb ' + TONES[i%3] + '"><span class="tn">' + esc(n2 || '图片') + '</span></div>').join('');
+    return '<div class="bubble"><div class="bub-head img">' + n + ' 张图片<span class="htype">图片 · image</span></div>' +
+      '<div class="img-grid' + (n === 1 ? ' one' : '') + '">' + tiles + '</div>' +
+      '<div class="bub-foot"><span class="ok">' + OK_ICO + '已发送 · ' + n + ' 张图</span><span>image_key 已换取</span></div></div>';
   }
   if (kind === 'interactive'){
     return '<div class="bubble"><div class="bub-head card">交互卡片<span class="htype">interactive</span></div>' +
@@ -498,10 +536,11 @@ function bubbleHtml(rec){
   if (rec.payload && rec.payload.content && rec.payload.content.post){
     try{
       const post = rec.payload.content.post.zh_cn;
-      // image_key → 缩略图映射（附件图片按 imgKeys 顺序存于 rec.thumbs）
+      // image_key → 缩略图映射（附件图片按 imgKeys 顺序存于 media，见 recMedia）
+      const media = recMedia(rec);
       const keyThumb = {};
-      if (Array.isArray(rec.img_keys) && Array.isArray(rec.thumbs)){
-        rec.img_keys.forEach((k, i) => { if (k && rec.thumbs[i]) keyThumb[k] = rec.thumbs[i]; });
+      if (Array.isArray(media.img_keys) && Array.isArray(media.thumbs)){
+        media.img_keys.forEach((k, i) => { if (k && media.thumbs[i]) keyThumb[k] = media.thumbs[i]; });
       }
       const lines = [];
       for (const row of (post.content||[])){
@@ -512,7 +551,7 @@ function bubbleHtml(rec){
           else if (el.tag === 'at') line += '<span class="at">@' + esc(el.user_name||'某人') + '</span>';
           else if (el.tag === 'img'){
             const t = keyThumb[el.image_key];
-            line += t ? '<img class="post-img" src="' + t + '" alt="图片">' : ' [图片]';
+            line += t ? '<img class="post-img" src="' + t + '" alt="图片">' : '<span class="post-img-ph">图片</span>';
           }
         }
         lines.push(line);
@@ -534,7 +573,8 @@ function fileCardHtml(rec){
   const running = rec.state === 'uploading' || rec.state === 'downloading';
   let st;
   if (rec.state === 'done' || rec.state === 'downloaded'){
-    st = '<span class="st">' + OK_ICO + (dir === 'in' ? '已解密并保存到下载目录' : '取回链接已发到 ' + esc(rec.bot_name || '群') + ' · 30 分钟内有效') + '</span>' +
+    // 「N 分钟」须与 Rust `crypto::FRESHNESS_WINDOW_MINUTES`（链接有效期）一致
+    st = '<span class="st">' + OK_ICO + (dir === 'in' ? '已解密并保存到下载目录' : '取回链接已发到 ' + esc(rec.bot_name || '群') + ' · 10 分钟内有效') + '</span>' +
          '<span class="bacts">' + (dir === 'in' ? '<button data-open-dir>打开目录</button>' : '<button class="hi" data-copy-link>复制链接</button>') + '</span>';
   } else if (rec.state === 'failed' || rec.state === 'cancelled'){
     st = '<span class="st">' + WARN_ICO + esc(rec.error || (rec.state === 'cancelled' ? '已取消' : '传输失败')) + '</span>' +
@@ -863,19 +903,23 @@ function parseRetrieve(){
     hint.textContent = '请先粘贴群里的取回链接，或链接 t= 后面那段载荷。';
     return;
   }
-  if (!/^https?:\/\/127\.0\.0\.1:\d+\/dl\?t=.+/.test(v) && !/^[A-Za-z0-9_-]{24,}$/.test(v)){
-    hint.classList.add('bad');
-    hint.textContent = '这不像青鸟的取回链接：应形如 http://127.0.0.1:9876/dl?t=… ，或直接是 t= 后面那段载荷。';
-    return;
-  }
   if (!invoke){ hint.classList.add('bad'); hint.textContent = 'Tauri 环境不可用。'; return; }
+  // 形态校验交给后端（唯一权威）：前端只认「http://127.0.0.1:<port>/dl?t=…」会在
+  // 链接被飞书包装/百分号编码、或粘贴整条消息时静默拦掉合法输入（§9.2 兜底入口）
+  const go = $('#retrieveGo');
+  if (go.disabled) return;
+  go.disabled = true;
   invoke('transfer_parse_payload', {input: v}).then(meta => {
     hint.textContent = '链接有效，已开始下载，进度会出现在下方记录里。';
+    toast('已开始下载', '取回链接有效');
+    $('#retrieveInput').value = '';
+    retrievePop.classList.remove('show');
+    retrieveBtn.setAttribute('aria-expanded', 'false');
     const rec = {
       time: nowIso(), kind: 'file', dir: 'in',
       name: meta.name, size: meta.size || 0,
       state: 'downloading', bytes_done: 0,
-      fingerprint: meta.fingerprint
+      fingerprint: meta.fingerprint || ''
     };
     const art = addRecord(rec);
     const card = $('.filecard', art);
@@ -896,9 +940,12 @@ function parseRetrieve(){
       setTimeout(() => pollFinalState(res.task_id), 300);
     });
   }).catch(e => {
+    const msg = String(e && e.message || e).slice(0, 120);
     hint.classList.add('bad');
-    hint.textContent = String(e && e.message || e).slice(0, 120);
-  });
+    hint.textContent = msg;
+    // 失败也要显式反馈，否则看起来就是「点了没反应」
+    toast('无法解析取回链接', msg, 'err');
+  }).finally(() => { go.disabled = false; });
 }
 $('#retrieveGo').addEventListener('click', parseRetrieve);
 $('#retrieveInput').addEventListener('keydown', e => { if (e.key === 'Enter') parseRetrieve(); });
@@ -944,6 +991,7 @@ $('#btnSend').addEventListener('click', send);
 $('#expandSend').addEventListener('click', send);
 
 /* 拖拽 */
+const IMG_MIME = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', bmp:'image/bmp', svg:'image/svg+xml' };
 const dropzone = $('#dropzone');
 function showDrop(on){
   dropzone.classList.toggle('show', on);
@@ -956,7 +1004,9 @@ function handleDroppedPaths(paths){
     if (IMG_EXT.test(name)){
       if (invoke){
         invoke('read_file_base64', {path: p}).then(b64 => {
-          insertChip(activeEd(), name, 'data:image;base64,' + b64);
+          // MIME 必须完整（'data:image;base64,…' 缺子类型，浏览器解不出来 → 缩略图空白）
+          const mime = IMG_MIME[(name.split('.').pop() || '').toLowerCase()] || 'image/png';
+          insertChip(activeEd(), name, 'data:' + mime + ';base64,' + b64);
         }).catch(e => toast('读取图片失败', String(e).slice(0,80), 'err'));
       }
     } else {
@@ -978,20 +1028,28 @@ if (TAURI && TAURI.webview && TAURI.webview.getCurrentWebview){
 
 /* ===================== 放大编辑 ===================== */
 const expand = $('#expand');
+function moveChildren(from, to){
+  while (from.firstChild) to.appendChild(from.firstChild);
+}
 function openExpand(){
-  expEd.innerHTML = ed.innerHTML;
-  syncEmpty(expEd);
+  // 搬 DOM 节点而不是拷 innerHTML：chip 的 _dataUrl/_imageKey 是 JS 属性，
+  // innerHTML 克隆会丢掉，收起后图片既发不出去也会卡在「仍在上传中」
+  const hadContent = !isBlank(ed);
+  RANGES.delete(ed);   // 搬走后旧 range 偏移可能越界，插图片时走 append 兜底
+  moveChildren(ed, expEd);
+  syncEmpty(ed); syncEmpty(expEd);
   $('#expandTitle').value = '';
-  $('#expandFrom').textContent = isBlank(ed)
-    ? '输入框还是空的 · 收起时会带回去'
-    : '已带入输入框里的内容 · 收起时会带回去';
+  $('#expandFrom').textContent = hadContent
+    ? '已带入输入框里的内容 · 收起时会带回去'
+    : '输入框还是空的 · 收起时会带回去';
   expand.classList.add('show');
   refresh();
   setTimeout(() => { expEd.focus(); placeCaretEnd(expEd); }, 60);
 }
 function closeExpand(){
-  ed.innerHTML = expEd.innerHTML;
-  syncEmpty(ed);
+  RANGES.delete(expEd);
+  moveChildren(expEd, ed);
+  syncEmpty(expEd); syncEmpty(ed);
   expand.classList.remove('show');
   refresh();
   setTimeout(() => { ed.focus(); placeCaretEnd(ed); }, 40);

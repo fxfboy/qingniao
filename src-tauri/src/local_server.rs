@@ -2,7 +2,7 @@
 //!
 //! wire contract（§10.1）：
 //! - 仅监听 `127.0.0.1:<bound_port>`；Host 校验防 DNS rebinding
-//! - GET  /dl?t=…       无副作用，校验通过 → 渲染确认页（一次性 handle，10 min）
+//! - GET  /dl?t=…       无副作用，校验通过 → 渲染确认页（一次性 handle，活到链接新鲜度窗口结束）
 //! - POST /dl/confirm   Origin/Referer 校验（缺/跨 → 403）→ Content-Type → handle 单消费
 //! - 错误统一 JSON `{"code":..,"msg":..}`；Cache-Control: no-store
 //! - 并发连接 ≤ 4（4 个 worker 线程共同 recv）；读超时 10 s、写超时 30 s
@@ -15,9 +15,6 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tiny_http::{Header, Method, Response, Server};
-
-/// 确认 handle 有效期 10 min（§10.1）
-pub const HANDLE_TTL_SECS: i64 = 10 * 60;
 
 pub struct RealLocalService {
     /// 权威状态持有者（与 AppState.set_service_status 共享）
@@ -243,6 +240,8 @@ fn handle_get_dl(ctx: &Ctx, request: tiny_http::Request, url: &str) {
         ("{{SENT_TIME}}", String::new()),
         ("{{TTL_TEXT}}", String::new()),
         ("{{TTL_SECS}}", "0".into()),
+        // 链接有效期文案（与「链接 N 分钟内有效」「剩余有效期」倒计时同一常量）
+        ("{{FRESH_WINDOW}}", format!("{} 分钟", crate::transfer::crypto::FRESHNESS_WINDOW_MINUTES)),
         ("{{HANDLE}}", String::new()),
         ("{{DIR}}", String::new()),
         ("{{FINAL_PATH}}", String::new()),
@@ -263,10 +262,11 @@ fn handle_get_dl(ctx: &Ctx, request: tiny_http::Request, url: &str) {
                 respond_html(request, 200, &html);
                 return;
             }
-            // 创建一次性会话（handle = CSPRNG 128-bit hex，10 min）
+            // 创建一次性会话（handle = CSPRNG 128-bit hex，活到链接新鲜度窗口结束）
             match ctx.engine.create_session(&payload, ev) {
                 Ok(sess) => {
-                    let ttl = (HANDLE_TTL_SECS - (crate::transfer::crypto::now_unix() - sess.created_at)).max(0);
+                    // 倒计时 = 链接剩余有效期（payload.ts + 30 min），与群消息/历史文案同源
+                    let ttl = (sess.expires_at - crate::transfer::crypto::now_unix()).max(0);
                     state = "pending".into();
                     set_var(&mut vars, "{{NAME}}", html_escape(&sess.name));
                     set_var(&mut vars, "{{SIZE_HUMAN}}", human_size(sess.size));
