@@ -69,7 +69,7 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri"
+          workspaces: "./"
 
       - name: Install npm dependencies
         run: npm install
@@ -105,7 +105,7 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri"
+          workspaces: "./"
 
       - name: Install npm dependencies
         run: npm install
@@ -117,7 +117,7 @@ jobs:
         shell: pwsh
         run: |
           $zipName = "QingNiao_${{ needs.check-version.outputs.version }}_windows-x64.zip"
-          Compress-Archive -Path src-tauri\target\release\qingniao.exe -DestinationPath $zipName
+          Compress-Archive -Path target\release\qingniao.exe -DestinationPath $zipName
           Get-Item $zipName | Select-Object Name, Length
 
       - name: 上传 zip 到 Release
@@ -144,7 +144,7 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri"
+          workspaces: "./"
 
       - name: Install npm dependencies
         run: npm install
@@ -210,7 +210,7 @@ jobs:
       - name: 打包 zip（exe + WebView2 运行时）
         shell: pwsh
         run: |
-          $releaseDir = "src-tauri\target\release"
+          $releaseDir = "target\release"
 
           # --no-bundle 不会自动复制运行时到输出目录，手动复制到 exe 同目录
           if (-not (Test-Path "$releaseDir\WebView2Runtime")) {

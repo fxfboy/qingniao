@@ -34,7 +34,14 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri"
+          workspaces: "./"
+
+      - name: core 零 tauri 依赖检查（方案 D2）
+        run: |
+          if cargo tree -p qingniao-core | grep -i tauri; then
+            echo "::error::qingniao-core 不得依赖 tauri"
+            exit 1
+          fi
 
       - name: cargo test
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --workspace
