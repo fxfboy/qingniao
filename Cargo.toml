@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
 # qingniao：APP（Tauri）+ 共享核心（零 tauri 依赖）+ CLI（方案 v3 §二 D1）
-members = ["src-tauri", "crates/qingniao-core"]
+members = ["src-tauri", "crates/qingniao-core", "crates/qingniao-cli"]
