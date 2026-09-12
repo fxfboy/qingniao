@@ -396,32 +396,55 @@
     border-radius: 8px; border: 1px solid var(--border);
     vertical-align: top; margin: 2px 0;
   }
+  /* 无缩略图可用的内联图片（CLI 发送 / 更早的记录）*/
+  .bub-body .post-img-ph{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width: 120px; height: 84px; margin: 2px 0;
+    border-radius: 8px; border: 1px dashed var(--border-strong);
+    background: var(--surface-soft);
+    font-size: 11.5px; color: var(--muted);
+    vertical-align: top;
+  }
 
-  /* 内联图片芯片（输入框内 / 徽标） */
+  /* 输入框内的图片附件：大图预览卡片（对标飞书输入框）
+     预览尺寸由 JS 按原图比例写 inline style，这里的 120×90 只是解码前的兜底 */
   .chip{
-    display:inline-flex; align-items:center; gap:7px;
-    vertical-align: bottom;
-    margin: 2px 2px;
-    padding: 3px 9px 3px 3px;
-    border-radius: 8px;
+    position: relative;
+    display:inline-flex; flex-direction: column; align-items: stretch; gap: 2px;
+    width: max-content; max-width: 232px;
+    vertical-align: top;
+    margin: 4px 3px;
+    padding: 4px 4px 2px;
+    border-radius: 12px;
     border: 1px solid var(--border);
     background: var(--surface);
-    font-size: 12.5px; color: var(--fg);
-    max-width: 220px;
+    font-size: 12px; color: var(--fg);
     user-select: none;
   }
-  .chip .cthumb{
-    width: 26px; height: 26px; border-radius: 5px; flex:none;
-    background: linear-gradient(135deg, oklch(0.88 0.07 200), oklch(0.72 0.11 265));
-    background-size: cover; background-position: center;
+  .chip .cimg{
+    display:block; flex:none;
+    width: 120px; height: 90px;
+    border-radius: 8px;
+    object-fit: contain;
+    background: var(--surface-soft);
   }
-  .chip .cthumb.b{background: linear-gradient(135deg, oklch(0.9 0.06 150), oklch(0.74 0.1 190))}
-  .chip .cnm{overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  /* 解码失败：占位渐变，而不是空白大块 */
+  .chip .cimg.bad{background: linear-gradient(135deg, oklch(0.88 0.07 200), oklch(0.72 0.11 265))}
+  .chip .cnm{
+    padding: 1px 4px 3px;
+    font-size: 11.5px; color: var(--muted);
+    overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+  }
   .chip .cx{
-    flex:none; width:16px; height:16px; border-radius:50%;
-    display:grid; place-items:center; color: var(--muted); font-size:13px; line-height:1;
+    position:absolute; top:8px; right:8px;
+    width:20px; height:20px; border-radius:50%;
+    display:grid; place-items:center;
+    background: oklch(0.2 0.02 240 / 0.55); color:#fff;
+    font-size:14px; line-height:1;
+    backdrop-filter: blur(2px);
+    transition: background .12s ease;
   }
-  .chip .cx:hover{background: var(--surface-soft); color: var(--fg)}
+  .chip .cx:hover{background: var(--danger); color:#fff}
 
   /* ============================================================
      文件记录（嵌在历史里）
@@ -542,7 +565,7 @@
   }
   .ed{
     flex: 1 1 0; min-width: 0;
-    max-height: 168px; overflow-y: auto;
+    max-height: 200px; overflow-y: auto;
     padding: 8px 0;
     font-size: 14px; line-height: 1.6;
     color: var(--fg);
@@ -1236,8 +1259,7 @@
   html[data-theme="dark"] .thumb.a{background: linear-gradient(135deg, oklch(0.38 0.07 200), oklch(0.3 0.1 265))}
   html[data-theme="dark"] .thumb.b{background: linear-gradient(135deg, oklch(0.36 0.06 150), oklch(0.32 0.08 190))}
   html[data-theme="dark"] .thumb.c{background: linear-gradient(135deg, oklch(0.4 0.07 85), oklch(0.34 0.1 40))}
-  html[data-theme="dark"] .chip .cthumb{background: linear-gradient(135deg, oklch(0.4 0.07 200), oklch(0.32 0.1 265))}
-  html[data-theme="dark"] .chip .cthumb.b{background: linear-gradient(135deg, oklch(0.38 0.06 150), oklch(0.34 0.08 190))}
+  html[data-theme="dark"] .chip .cimg.bad{background: linear-gradient(135deg, oklch(0.4 0.07 200), oklch(0.32 0.1 265))}
   html[data-theme="dark"] .msg .av.person{background: linear-gradient(135deg, oklch(0.36 0.06 45), oklch(0.3 0.07 25)); color: oklch(0.88 0.08 45)}
   html[data-theme="dark"] .card-btns button.primary:hover{background: var(--accent-fill-hover); border-color: var(--accent-fill-hover)}
   html[data-theme="dark"] .csend.ready:hover{background: var(--accent-fill-hover)}
