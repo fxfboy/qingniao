@@ -184,17 +184,28 @@ function countChars(el){ return ((edText(el)||'').replace(/\s/g,'')).length; }
 function activeEd(){ return $('#expand').classList.contains('show') ? expEd : ed; }
 
 const TYPE_LABEL = { text:'文本', post:'富文本', image:'图片', interactive:'交互卡片' };
-// 类型识别纯逻辑在 src/message.js（与 CLI 共用），此处只做 DOM 解包
-function detect(el){
-  return detectType(edText(el), $$('.chip', el).length);
-}
-function forcedType(){
-  const v = config.last_type || 'auto';
-  return v === 'auto' || TYPE_LABEL[v] ? v : 'auto';
-}
-function refresh(){
+/* 类型识别走 Rust core（invoke 'analyze'，D15：150ms 防抖 + 递增序号，仅最新序号生效）；
+ * Tauri 不可用时降级到 src/message.js 的本地 detectType（同一基线实现） */
+let analyzeSeq = 0, analyzeTimer = null, lastAnalysis = { t:'text', why:'' };
+function analyzeAsync(){
+  const seq = ++analyzeSeq;
   const el = activeEd();
-  const d = detect(el);
+  const text = edText(el);
+  const chips = $$('.chip', el).length;
+  const apply = (d) => {
+    if (seq !== analyzeSeq) return;   // 旧响应不得覆盖新识别
+    lastAnalysis = d;
+    renderTypePill(d);
+  };
+  if(!invoke){ apply(detectType(text, chips)); return; }
+  invoke('analyze', {text, chips}).then(apply).catch(() => apply(detectType(text, chips)));
+}
+function detect(el){
+  // 保留同步取值口径（send 校验等用 lastAnalysis），识别更新走 analyzeAsync
+  return lastAnalysis;
+}
+function renderTypePill(d){
+  const el = activeEd();
   const ft = forcedType();
   const finalType = ft === 'auto' ? d.t : ft;
   const pill = $('#typePill');
@@ -202,6 +213,14 @@ function refresh(){
   pill.textContent = TYPE_LABEL[finalType] || '文本';
   $('#whyText').innerHTML = ft === 'auto' ? d.why :
     '已指定为 <b>' + TYPE_LABEL[ft] + '</b>（识别结果：' + TYPE_LABEL[d.t] + '）';
+}
+function forcedType(){
+  const v = config.last_type || 'auto';
+  return v === 'auto' || TYPE_LABEL[v] ? v : 'auto';
+}
+function refresh(){
+  const el = activeEd();
+  renderTypePill(lastAnalysis);
 
   const n = countChars(el);
   $('#counter').textContent = n ? n + ' 字' : '';
@@ -212,6 +231,11 @@ function refresh(){
     b.classList.toggle('ready', ready);
     b.setAttribute('aria-disabled', String(!ready));
   });
+
+  // 输入防抖 150ms 后异步识别（D15）
+  clearTimeout(analyzeTimer);
+  analyzeTimer = setTimeout(analyzeAsync, 150);
+  if (analyzeTimer && !ready) { /* 空编辑器也走防抖，保证 pill 复位 */ }
 }
 function updateBotLabels(){
   const bot = config.webhooks[config.last_webhook];
@@ -307,33 +331,7 @@ function uploadChip(chip){
   });
 });
 
-/* ===================== 消息组装（纯逻辑已下沉 src/message.js） ===================== */
-function makePreview(text, type){
-  if(type === 'image') return '图片消息';
-  if(type === 'interactive') return '交互卡片消息';
-  return (text.split('\n')[0]||'').slice(0,60) || '(空)';
-}
-async function sendWebhook(payload){
-  const bot = config.webhooks[config.last_webhook];
-  if(!bot) throw '未配置机器人';
-  if(bot.secret){
-    const ts = Math.floor(Date.now()/1000).toString();
-    payload = Object.assign({}, payload, {timestamp: ts, sign: await hmacSign(bot.secret, ts)});
-  }
-  if(!invoke) throw 'Tauri 环境不可用';
-  const respText = await invoke('send_webhook', {url: bot.url, payload});
-  const m = respText.match(/^HTTP (\d+):\s*(.*)$/s);
-  const httpStatus = m ? parseInt(m[1]) : 0;
-  const body = m ? m[2] : respText;
-  let ok = httpStatus >= 200 && httpStatus < 300;
-  let msg = 'HTTP ' + httpStatus;
-  try{
-    const j = JSON.parse(body);
-    if(j.code === 0){ ok = true; msg = '200 OK'; }
-    else if(j.code !== undefined){ ok = false; msg = j.code + ' ' + (j.msg||''); }
-  }catch(e){}
-  return {ok, msg};
-}
+/* ===================== 消息组装与发送（组装/签名/历史全在 Rust core，方案 v3 §九 D7） ===================== */
 
 /* 编辑器内容收集 */
 function collectEd(el){
@@ -375,15 +373,11 @@ async function send(){
 
   const {text, chips, imgKeys, pending} = collectEd(el);
   if(pending){ toast('图片仍在上传中，请稍候', '', 'err'); return; }
-  const d = detect(el);
-  const type = forcedType() === 'auto' ? d.t : forcedType();
+  const ft = forcedType();
+  const type = ft === 'auto' ? lastAnalysis.t : ft;
   if(type !== 'image' && !text.trim() && !chips.length){ toast('内容为空', '', 'err'); return; }
 
-  let payload;
-  try{
-    const title = el === expEd ? ($('#expandTitle').value.trim() || '') : '';
-    payload = buildPayload(text, type, imgKeys, title);
-  }catch(e){ toast('消息组装失败', e.message, 'err'); return; }
+  const title = el === expEd ? ($('#expandTitle').value.trim() || '') : '';
 
   // 记录用的图片元数据（与 imgKeys 同序）
   const keyed = chips.filter(c => c._imageKey);
@@ -393,29 +387,34 @@ async function send(){
     img_keys: keyed.map(c => c._imageKey),
     thumbs
   } : {};
+  const extra = {};
+  if (type === 'text' || type === 'post') extra.text = text;
+  if (Object.keys(media).length) extra.media = media;
+  const summary = type === 'image'
+    ? chips.map(c=>c.dataset.name).join(', ') + ' (' + chips.length + ' 张图)'
+    : null;
 
   const t0 = performance.now();
   log('info', 'send: 开始发送 type=' + type + ' 机器人=' + (bot.name || '?'));
   try{
-    const r = await sendWebhook(payload);
+    if(!invoke) throw 'Tauri 环境不可用';
+    // 组装 / 签名 / 发送 / 历史写入全部在 core（D7）；网络失败也会记录 failed/unknown
+    const r = await invoke('send_message', {
+      botKey: null, msgType: ft, text, imageKeys: imgKeys,
+      title: title || null, summary: summary || null,
+      extra: Object.keys(extra).length ? extra : null,
+    });
     const dt = Math.round(performance.now() - t0);
-    log((r.ok ? 'info' : 'error'), 'send: 完成 type=' + type + ' ' + r.msg + ' · ' + dt + 'ms');
-    const rec = {
-      time: nowIso(), kind: type, dir: 'out',
-      summary: makePreview(text, type), ok: r.ok, status: r.msg,
-      payload, ...media
-    };
-    if (type === 'text' || type === 'post') rec.text = text;
-    if (type === 'image') rec.summary = chips.map(c=>c.dataset.name).join(', ') + ' (' + chips.length + ' 张图)';
-    addRecord(rec);
+    log(r.ok ? 'info' : 'error', 'send: 完成 type=' + type + ' ' + r.status_line + ' · ' + dt + 'ms');
+    addRecord(r.record, false);   // 历史已由 core 落盘，这里只做界面渲染
     el.innerHTML = '';
     syncEmpty(el); refresh();
     if(el === expEd) $('#expandTitle').value = '';
-    toast(r.ok ? ('已发送到 ' + bot.name) : '发送失败', r.msg, r.ok ? '' : 'err');
+    toast(r.ok ? ('已发送到 ' + bot.name) : '发送失败', r.status_line, r.ok ? '' : 'err');
   }catch(e){
     const msg = typeof e === 'string' ? e : (e && e.message) || String(e);
     log('error', 'send: 发送失败 ' + msg);
-    addRecord({time: nowIso(), kind: type, dir:'out', summary: makePreview(text, type), ok:false, status:'发送失败', payload, ...media});
+    // Err 仅发生在发送之前（bot 缺失/组装失败等），core 未记录历史
     toast('发送失败', msg, 'err');
   }
 }
@@ -593,10 +592,11 @@ function renderStream(){
   refreshStats();
   scrollToEnd(false);
 }
-function addRecord(rec){
+function addRecord(rec, persist = true){
   config.history.push(rec);
   if(config.history.length > 100) config.history.shift();
-  saveConfig();
+  // persist=false：记录已由 Rust core 落盘（消息发送，D7），此处只渲染
+  if (persist) saveConfig();
   // 增量插入
   const stream = $('#stream');
   const lastRec = config.history[config.history.length - 2];
@@ -647,10 +647,13 @@ $('#stream').addEventListener('click', async e => {
     } else if (act === 'resend'){
       if (rec.payload){
         try{
-          const r = await sendWebhook(JSON.parse(JSON.stringify(rec.payload)));
-          rec.ok = r.ok; rec.status = r.msg; saveConfig(); renderStream();
-          toast(r.ok ? '已重新发送' : '重新发送失败', r.msg, r.ok ? '' : 'err');
-        }catch(e2){ toast('重新发送失败', String(e2), 'err'); }
+          if(!invoke) throw 'Tauri 环境不可用';
+          // 重发走 core：重签名 + 按 time 更新原历史条目（不追加）
+          const r = await invoke('resend_payload', {payload: rec.payload, botKey: null, recTime: rec.time});
+          rec.ok = r.ok; rec.status = r.status_line; rec.state = r.state;
+          saveConfig(); renderStream();
+          toast(r.ok ? '已重新发送' : '重新发送失败', r.status_line, r.ok ? '' : 'err');
+        }catch(e2){ toast('重新发送失败', String(e2 && e2.message || e2), 'err'); }
       }
     }
     return;

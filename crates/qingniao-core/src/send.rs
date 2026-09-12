@@ -178,16 +178,23 @@ pub fn record_send(
     })
 }
 
-/// 端到端发送：组装签名 payload（调用方先用 `crate::message::build_payload` 组装）→
-/// HTTP → 产出 [`RecordedSend`]。写历史由调用方拿到 record 后调 [`record_send`]，
-/// 以便 CLI 先处理 dry-run（不发送也不写历史）。
-pub fn dispatch_send(
+/// 一次发送尝试：bot 已解析、payload 已签名、HTTP 已执行。
+/// `result` 的 Err 是网络/超时层失败（仍属「已尝试」，调用方需记录 failed/unknown 历史）；
+/// 本函数自身的 Err 是 usage/config 级失败（bot 不存在 / URL 策略），发生在发送之前。
+pub struct SendAttempt {
+    pub bot: crate::config::BotView,
+    pub result: Result<SendResult, SendFailure>,
+}
+
+/// 解析目标机器人 + URL 策略 + 组装签名 payload + 发送（HTTP 层）。
+/// dispatch_send（含历史记录构造）与 APP 的 resend 都复用此入口。
+pub fn send_prebuilt(
     cfg: &Config,
     bot_key: Option<&str>,
     payload: &Value,
-    allow_insecure_url: bool,
+    allow_insecure: bool,
     now_secs: u64,
-) -> Result<RecordedSend, SendFailure> {
+) -> Result<SendAttempt, SendFailure> {
     let bot = match bot_key {
         Some(key) => cfg.find_bot(key).ok_or_else(|| {
             SendFailure::new(SendErrorKind::Usage, format!("未找到机器人: {key}"))
@@ -199,24 +206,45 @@ pub fn dispatch_send(
             )
         })?,
     };
-    check_url_policy(&bot.url, allow_insecure_url)
+    check_url_policy(&bot.url, allow_insecure)
         .map_err(|m| SendFailure::new(SendErrorKind::Usage, m))?;
+    let signed = build_signed_payload(&bot.secret, payload, now_secs);
+    let result = send_webhook(&bot.url, &signed);
+    Ok(SendAttempt { bot, result })
+}
+
+/// SendResult → 与 APP status 文案兼容的展示串（`200 OK` / `{code} {msg}` / `HTTP {n}`）
+pub fn status_line_of(r: &SendResult) -> String {
+    let body = r
+        .body_summary
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .unwrap_or(Value::Null);
+    status_line_for(r.http_status.unwrap_or(0), &body)
+}
+
+/// 端到端发送：组装签名 payload（调用方先用 `crate::message::build_payload` 组装）→
+/// HTTP → 产出 [`RecordedSend`]。写历史由调用方拿到 record 后调 [`record_send`]，
+/// 以便 CLI 先处理 dry-run（不发送也不写历史）。
+pub fn dispatch_send(
+    cfg: &Config,
+    bot_key: Option<&str>,
+    payload: &Value,
+    allow_insecure_url: bool,
+    now_secs: u64,
+) -> Result<RecordedSend, SendFailure> {
+    let attempt = send_prebuilt(cfg, bot_key, payload, allow_insecure_url, now_secs)?;
+    let bot_name = attempt.bot.name.clone();
+    let result = attempt.result;
 
     let msg_type = payload
         .get("msg_type")
         .and_then(|v| v.as_str())
         .unwrap_or("?")
         .to_string();
-    let signed = build_signed_payload(&bot.secret, payload, now_secs);
-    let result = send_webhook(&bot.url, &signed);
-
     let (state, status_line, ok_flag) = match &result {
         Ok(r) => {
-            let body = serde_json::from_str::<Value>(
-                r.body_summary.as_deref().unwrap_or("Null"),
-            )
-            .unwrap_or(Value::Null);
-            let line = status_line_for(r.http_status.unwrap_or(0), &body);
+            let line = status_line_of(r);
             let state = if r.ok { "sent" } else { "failed" };
             (state, line, r.ok)
         }
@@ -235,7 +263,7 @@ pub fn dispatch_send(
         "status": status_line,
         "state": state,
         "payload": payload,
-        "bot": bot.name,
+        "bot": bot_name,
     });
 
     Ok(RecordedSend {
