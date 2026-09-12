@@ -23,8 +23,8 @@ jobs:
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
-          TAURI_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\(.*\)"/\1/p' src-tauri/tauri.conf.json | head -1)
-          NPM_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\(.*\)"/\1/p' package.json | head -1)
+          TAURI_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' src-tauri/tauri.conf.json | head -1)
+          NPM_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -1)
           echo "tag=${TAG_VERSION} cargo=${CARGO_VERSION} tauri=${TAURI_VERSION} npm=${NPM_VERSION}"
           fail() { echo "::error::$1"; exit 1; }
           [ -n "$CARGO_VERSION" ] || fail "无法从 src-tauri/Cargo.toml 读取版本"
