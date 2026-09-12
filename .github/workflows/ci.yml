@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # golden 基线：src/message.js 真实行为 vs tests/golden/golden.json（方案 v3 §四 D12）
+  golden:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: golden 校验
+        run: npm test
+
+  # Rust 单测（transfer / 后续 qingniao-core）
+  rust-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./"
+
+      - name: core 零 tauri 依赖检查（方案 D2）
+        run: |
+          if cargo tree -p qingniao-core | grep -i tauri; then
+            echo "::error::qingniao-core 不得依赖 tauri"
+            exit 1
+          fi
+
+      - name: cargo test
+        run: cargo test --workspace

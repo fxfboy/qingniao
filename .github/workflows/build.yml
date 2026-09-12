@@ -18,20 +18,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 校验 tag 与 Cargo.toml 版本一致
+      - name: 校验 tag 与四源版本一致（Cargo.toml 为单一来源，见方案 D14）
         id: version
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
-          echo "tag=${GITHUB_REF_NAME} cargo=${CARGO_VERSION}"
-          if [ -z "$CARGO_VERSION" ]; then
-            echo "::error::无法从 src-tauri/Cargo.toml 读取版本"
-            exit 1
-          fi
-          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
-            echo "::error::tag 版本(${TAG_VERSION})与 Cargo.toml 版本(${CARGO_VERSION})不一致，请先更新版本再打 tag"
-            exit 1
-          fi
+          TAURI_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\(.*\)"/\1/p' src-tauri/tauri.conf.json | head -1)
+          NPM_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\(.*\)"/\1/p' package.json | head -1)
+          echo "tag=${TAG_VERSION} cargo=${CARGO_VERSION} tauri=${TAURI_VERSION} npm=${NPM_VERSION}"
+          fail() { echo "::error::$1"; exit 1; }
+          [ -n "$CARGO_VERSION" ] || fail "无法从 src-tauri/Cargo.toml 读取版本"
+          [ "$TAG_VERSION" = "$CARGO_VERSION" ] || fail "tag 版本(${TAG_VERSION})与 Cargo.toml 版本(${CARGO_VERSION})不一致，请先更新版本再打 tag"
+          [ "$CARGO_VERSION" = "$TAURI_VERSION" ] || fail "Cargo.toml(${CARGO_VERSION})与 tauri.conf.json(${TAURI_VERSION})版本不一致"
+          [ "$CARGO_VERSION" = "$NPM_VERSION" ] || fail "Cargo.toml(${CARGO_VERSION})与 package.json(${NPM_VERSION})版本不一致"
           echo "version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
 
   # 先创建 Draft Release，后续 macOS / Windows job 并行向同一 release 上传产物
@@ -70,10 +69,20 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri"
+          workspaces: "./"
 
       - name: Install npm dependencies
         run: npm install
+
+      - name: Build CLI（aarch64，方案 v3 §八 M5）
+        run: cargo build --release -p qingniao-cli --target aarch64-apple-darwin
+
+      - name: Stage CLI into resources（嵌入安装包）
+        run: |
+          mkdir -p src-tauri/resources/bin
+          cp target/aarch64-apple-darwin/release/qingniao-cli src-tauri/resources/bin/qingniao-cli
+          chmod +x src-tauri/resources/bin/qingniao-cli
+          lipo -archs src-tauri/resources/bin/qingniao-cli | grep -q arm64 || { echo "::error::CLI 架构不是 arm64"; exit 1; }
 
       - name: Build & Upload DMG
         uses: tauri-apps/tauri-action@v0
@@ -85,7 +94,25 @@ jobs:
           releaseBody: "青鸟 · 飞书消息助手 — 向飞书自定义机器人发送文本 / 富文本 / 图片 / 消息卡片"
           releaseDraft: true
           prerelease: false
-          args: --target aarch64-apple-darwin --bundles dmg
+          args: --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.release.conf.json
+
+      - name: Smoke test（嵌入资源可运行）+ 独立 CLI zip
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          APP_BUNDLE=$(find target/aarch64-apple-darwin/release/bundle/macos -maxdepth 1 -name "*.app" | head -1)
+          test -n "$APP_BUNDLE" || { echo "::error::未找到 .app 产物"; exit 1; }
+          EMBEDDED="$APP_BUNDLE/Contents/Resources/bin/qingniao-cli"
+          test -f "$EMBEDDED" || { echo "::error::CLI 未嵌入 .app 资源"; exit 1; }
+          lipo -archs "$EMBEDDED" | grep -q arm64
+          "$EMBEDDED" --version
+          # 独立分发包：安装时复制为 ~/.local/bin/qingniao（unsigned，见 D16）
+          STAGE=$(mktemp -d)
+          cp target/aarch64-apple-darwin/release/qingniao-cli "$STAGE/qingniao"
+          "$STAGE/qingniao" --version
+          (cd "$STAGE" && zip -q "$GITHUB_WORKSPACE/qingniao-${VERSION}-macos-arm64.zip" qingniao)
+          gh release upload "${{ github.ref_name }}" "qingniao-${VERSION}-macos-arm64.zip" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Windows：不打包安装程序（不要 msi），只出便携 zip
   build-windows:
@@ -106,22 +133,33 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri"
+          workspaces: "./"
 
       - name: Install npm dependencies
         run: npm install
 
+      - name: Build CLI
+        run: cargo build --release -p qingniao-cli
+
       - name: 构建 exe（跳过 msi / nsis）
         run: npm run tauri build -- --no-bundle
 
-      - name: 打包为 zip
+      - name: Smoke test CLI
+        shell: pwsh
+        run: target\release\qingniao-cli.exe --version
+
+      - name: 打包为 zip（APP + CLI）
         shell: pwsh
         run: |
-          $zipName = "QingNiao_${{ needs.check-version.outputs.version }}_windows-x64.zip"
-          Compress-Archive -Path src-tauri\target\release\qingniao.exe -DestinationPath $zipName
-          Get-Item $zipName | Select-Object Name, Length
+          $v = "${{ needs.check-version.outputs.version }}"
+          Compress-Archive -Path target\release\qingniao.exe, target\release\qingniao-cli.exe -DestinationPath "QingNiao_${v}_windows-x64.zip"
+          Compress-Archive -Path target\release\qingniao-cli.exe -DestinationPath "qingniao-${v}-windows-x64.zip"
+          Get-Item *.zip | Select-Object Name, Length
 
       - name: 上传 zip 到 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" "QingNiao_${{ needs.check-version.outputs.version }}_windows-x64.zip" --clobber
+        run: |
+          $v = "${{ needs.check-version.outputs.version }}"
+          gh release upload "${{ github.ref_name }}" "QingNiao_${v}_windows-x64.zip" --clobber
+          gh release upload "${{ github.ref_name }}" "qingniao-${v}-windows-x64.zip" --clobber

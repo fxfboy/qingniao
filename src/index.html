@@ -357,16 +357,18 @@
         <div class="pane-title-row">
           <h3>Agent 集成</h3>
         </div>
-        <p class="desc">让 <b style="color:var(--fg);font-weight:500">AI Agent</b> 通过命令行调用青鸟发消息、上传图片、查看历史。该能力在规划中，当前版本暂未开放。</p>
+        <p class="desc">让 <b style="color:var(--fg);font-weight:500">AI Agent</b> 通过命令行调用青鸟发消息、上传图片、查看历史。CLI 与技能只写入本机用户目录。</p>
         <div class="agent-card" data-agent="cli">
           <div class="agent-card-head">
             <div class="agent-ico cli">&gt;_</div>
             <div class="agent-meta">
               <b>青鸟 CLI <code>qingniao</code></b>
-              <span>在终端里发消息、上传图片、查看历史，支持 <code>--json</code> 结构化输出</span>
+              <span>在终端里发消息、上传图片、查看历史，支持 <code>--json</code>。符号链接指向 APP 内置二进制，随 APP 升级自动更新</span>
+              <div class="field-hint" id="cliHint"></div>
             </div>
             <div class="agent-card-cta">
-              <span class="agent-status" style="background:var(--track);color:var(--muted)">规划中</span>
+              <span class="agent-status" id="cliStatusBadge">检测中…</span>
+              <button class="btn-secondary" id="cliInstallBtn">安装</button>
             </div>
           </div>
         </div>
@@ -377,10 +379,13 @@
             </div>
             <div class="agent-meta">
               <b>Agent 技能包 <code>SKILL.md</code></b>
-              <span>让 Claude / Codex / 豆包等 Agent 识别青鸟能力，一个 <code>send</code> 就能发出去</span>
+              <span>让 Claude / Codex 等 Agent 识别青鸟能力，一个 <code>send</code> 就能发出去。托管同步，卸载只删青鸟自己的文件</span>
+              <div class="field-hint" id="skillHint"></div>
             </div>
             <div class="agent-card-cta">
-              <span class="agent-status" style="background:var(--track);color:var(--muted)">规划中</span>
+              <span class="agent-status" id="skillStatusBadge">检测中…</span>
+              <button class="btn-secondary" id="skillInstallBtn">安装</button>
+              <button class="btn-link" id="skillUninstallBtn">卸载</button>
             </div>
           </div>
         </div>
@@ -630,6 +635,7 @@
   <code id="toastMeta"></code>
 </div>
 
+<script src="message.js"></script>
 <script src="main.js"></script>
 </body>
 </html>
