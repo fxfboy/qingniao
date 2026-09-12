@@ -1182,7 +1182,62 @@ $$('#configOverlay .nav button').forEach(b => {
     b.classList.add('active');
     const target = tabToPane[b.dataset.tab];
     $$('#configOverlay .pane').forEach(p => p.classList.toggle('active', p.id === target));
+    if (target === 'paneAgent') refreshAgentStatus();
   });
+});
+
+/* ===================== Agent tab（CLI / 技能安装，模仿 paseo，方案 v3 §七） ===================== */
+function agentBadge(el, text, kind){
+  el.textContent = text;
+  el.style.background = kind === 'ok' ? 'rgba(52,199,89,.15)' : kind === 'warn' ? 'rgba(255,159,10,.18)' : 'var(--track)';
+  el.style.color = kind === 'ok' ? '#34c759' : kind === 'warn' ? '#ff9f0a' : 'var(--muted)';
+}
+async function refreshAgentStatus(){
+  const cliBadge = $('#cliStatusBadge'), cliBtn = $('#cliInstallBtn'), cliHint = $('#cliHint');
+  const skBadge = $('#skillStatusBadge'), skBtn = $('#skillInstallBtn'), skUn = $('#skillUninstallBtn'), skHint = $('#skillHint');
+  if(!invoke){ [cliBtn, skBtn, skUn].forEach(b => { if (b) b.disabled = true; }); return; }
+  try{
+    const [cli, sk] = await Promise.all([invoke('cli_install_status'), invoke('skills_status')]);
+    if (cli.installed){ agentBadge(cliBadge, '已安装', 'ok'); cliBtn.textContent = '重新安装'; }
+    else { agentBadge(cliBadge, cli.source_available ? '未安装' : '未打包', 'idle'); cliBtn.textContent = '安装'; }
+    cliBtn.disabled = !cli.source_available;
+    cliHint.textContent = cli.target_path
+      ? ('安装位置: ' + cli.target_path + (cli.installed ? '' : ' · 安装后需重开终端使 PATH 生效'))
+      : '';
+    if (sk.state === 'up-to-date') agentBadge(skBadge, '已安装 · 最新', 'ok');
+    else if (sk.state === 'drift') agentBadge(skBadge, '有更新', 'warn');
+    else agentBadge(skBadge, '未安装', 'idle');
+    skBtn.textContent = sk.state === 'up-to-date' ? '重新同步' : sk.state === 'drift' ? '更新' : '安装技能';
+    skUn.disabled = sk.state === 'not-installed';
+    skHint.textContent = '安装到 ' + sk.targets.map(t => '~/' + t.label + '/skills').join('、');
+  }catch(e){ /* 状态读取失败静默，按钮保持当前态 */ }
+}
+$('#cliInstallBtn')?.addEventListener('click', async () => {
+  const b = $('#cliInstallBtn');
+  b.disabled = true;
+  try{
+    await invoke('install_cli');
+    toast('CLI 已安装', '重开终端后即可使用 qingniao 命令');
+  }catch(e){ toast('CLI 安装失败', String(e && e.message || e), 'err'); }
+  refreshAgentStatus();
+});
+$('#skillInstallBtn')?.addEventListener('click', async () => {
+  const b = $('#skillInstallBtn');
+  b.disabled = true;
+  try{
+    await invoke('install_skills');
+    toast('技能已同步', 'Claude / Codex 等 Agent 即可发现青鸟技能');
+  }catch(e){ toast('技能同步失败', String(e && e.message || e), 'err'); }
+  refreshAgentStatus();
+});
+$('#skillUninstallBtn')?.addEventListener('click', async () => {
+  const b = $('#skillUninstallBtn');
+  b.disabled = true;
+  try{
+    await invoke('uninstall_skills');
+    toast('技能已卸载', '只移除了青鸟托管的文件');
+  }catch(e){ toast('卸载失败', String(e && e.message || e), 'err'); }
+  refreshAgentStatus();
 });
 
 $('#toggleSecret')?.addEventListener('click', () => {

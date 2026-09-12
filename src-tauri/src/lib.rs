@@ -880,6 +880,109 @@ fn resend_payload(
     resend_payload_impl(&cfg_path, payload, bot_key, rec_time, now_secs())
 }
 
+// ===== Agent-CLI M4：技能 / CLI 安装（完全模仿 paseo，方案 v3 §七 D13）=====
+
+/// bundle 技能源目录：打包环境取 resource_dir()/skills；开发环境回退仓库 skills/
+fn bundled_skills_dir(app: &tauri::AppHandle) -> PathBuf {
+    if let Ok(rd) = app.path().resource_dir() {
+        let p = rd.join("skills");
+        if p.join(qingniao_core::skills::SKILL_NAME).is_dir() {
+            return p;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("skills")
+}
+
+fn skill_targets() -> Vec<qingniao_core::skills::SkillTarget> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("/"));
+    qingniao_core::skills::default_targets(&home)
+}
+
+#[tauri::command]
+fn skills_status(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
+    qingniao_core::skills::get_status(&bundled_skills_dir(&app), &skill_targets())
+}
+
+#[tauri::command]
+fn install_skills(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
+    let dir = bundled_skills_dir(&app);
+    let targets = skill_targets();
+    qingniao_core::skills::install(&dir, &targets)?;
+    qingniao_core::skills::get_status(&dir, &targets)
+}
+
+#[tauri::command]
+fn uninstall_skills(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
+    let targets = skill_targets();
+    qingniao_core::skills::uninstall(&targets)?;
+    qingniao_core::skills::get_status(&bundled_skills_dir(&app), &targets)
+}
+
+/// CLI 二进制来源：打包环境 resources/bin；开发环境 current_exe 同目录（workspace target）
+fn cli_source_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let exe_name = if cfg!(target_os = "windows") { "qingniao-cli.exe" } else { "qingniao-cli" };
+    if let Ok(rd) = app.path().resource_dir() {
+        let p = rd.join("bin").join(exe_name);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let exe = std::env::current_exe().ok()?;
+    let p = exe.parent()?.join(exe_name);
+    p.exists().then_some(p)
+}
+
+fn cli_install_target() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(|d| PathBuf::from(d).join("qingniao").join("bin").join("qingniao.exe"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("bin").join("qingniao"))
+    }
+}
+
+#[tauri::command]
+fn cli_install_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let target = cli_install_target();
+    let source_available = cli_source_path(&app).is_some();
+    let installed = target.as_ref().map(|p| p.exists()).unwrap_or(false);
+    Ok(serde_json::json!({
+        "installed": installed,
+        "source_available": source_available,
+        "target_path": target.map(|p| p.display().to_string()),
+    }))
+}
+
+#[tauri::command]
+fn install_cli(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let source = cli_source_path(&app).ok_or(
+        "未找到 CLI 二进制（开发模式请先 cargo build -p qingniao-cli；打包环境由 CI 嵌入 resources）",
+    )?;
+    let target = cli_install_target().ok_or("无法定位安装目录（HOME/LOCALAPPDATA）")?;
+    qingniao_core::skills::install_cli_binary(&source, &target)?;
+    // unix：幂等往 shell rc 追加 PATH（仅 bash/zsh）
+    let mut shell_updated = false;
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            let shell = std::env::var("SHELL").unwrap_or_default();
+            let bin_dir = target
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| home.join(".local").join("bin"));
+            shell_updated = qingniao_core::skills::ensure_path_in_shell_rc(&home, &shell, &bin_dir)?;
+        }
+    }
+    log::info!("install_cli: target={} shell_updated={}", target.display(), shell_updated);
+    cli_install_status(app)
+}
+
 /// 上传图片到飞书，返回 image_key
 /// 流程：用 app_id/app_secret 换 tenant_access_token → multipart 上传到 im/v1/images
 #[tauri::command]
@@ -1420,6 +1523,11 @@ pub fn run() {
             analyze,
             send_message,
             resend_payload,
+            skills_status,
+            install_skills,
+            uninstall_skills,
+            cli_install_status,
+            install_cli,
             key_status,
             key_generate,
             key_export,
@@ -1441,6 +1549,23 @@ pub fn run() {
             // 先装 logger，之后的 tray / 生命周期日志才有处可去
             install_file_logger(app.handle());
             log::info!("青鸟启动：单实例判定通过，开始初始化常驻功能");
+
+            // ===== Agent 技能 drift 自动更新（方案 v3 §七 D13）=====
+            {
+                let app_handle = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("qn-skills-autoupdate".into())
+                    .spawn(move || {
+                        let dir = bundled_skills_dir(&app_handle);
+                        let targets = skill_targets();
+                        match qingniao_core::skills::auto_update(&dir, &targets) {
+                            Ok(true) => log::info!("Agent 技能检测到漂移，已自动更新"),
+                            Ok(false) => {}
+                            Err(e) => log::warn!("Agent 技能自动更新失败: {e}"),
+                        }
+                    })
+                    .ok();
+            }
 
             // ===== 传输功能装配（dock-tray 阶段 B）=====
             // 1. 引擎：<app_config_dir>/transfer（quota.json / consumed.json 等持久化在此）
