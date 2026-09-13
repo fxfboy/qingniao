@@ -8,7 +8,7 @@
 
 use qingniao_core::transfer::crypto as c;
 use qingniao_core::transfer::engine::extract_payload;
-use qingniao_core::transfer::feishu::webhook_sign;
+// webhook_sign 已去重进 message::hmac_sign（M1），这里对齐
 
 /* ===================== webhook 签名 ===================== */
 
@@ -16,13 +16,13 @@ use qingniao_core::transfer::feishu::webhook_sign;
 fn webhook_sign_known_vector() {
     // 冻结向量：HMAC-SHA256(key = "1700000000\n" + secret, msg = "") 的 base64
     assert_eq!(
-        webhook_sign("test-secret", "1700000000"),
+        qingniao_core::message::hmac_sign("test-secret", "1700000000"),
         "mbm4Y4oluIPQ00qlBIhX8vAZ0EKv3nw0LuTb91jPL84=",
         "webhook 签名算法或编码被改动——会导致飞书侧签名校验失败（19021）"
     );
     // 与 core 的既有实现同语义（两份实现属重复，M1 收敛时以 core 为准）
     assert_eq!(
-        webhook_sign("test-secret", "1700000000"),
+        qingniao_core::message::hmac_sign("test-secret", "1700000000"),
         qingniao_core::message::hmac_sign("test-secret", "1700000000"),
         "transfer 的 webhook_sign 与 core 的 hmac_sign 语义已分叉"
     );

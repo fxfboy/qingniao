@@ -13,7 +13,8 @@ use std::time::Duration;
 /// 本地服务默认端口。
 ///
 /// **仅**作为 `configured_port` 的默认值来源；菜单文案禁止硬编码该字面量（§9.2）。
-pub const DEFAULT_LOCAL_PORT: u16 = 9876;
+// 自 M0c 起真源在 core（链接端口口径 configured_port 的缺省值），此处仅转发既有引用
+pub use qingniao_core::transfer::engine::DEFAULT_LOCAL_PORT;
 
 /// 服务启动失败原因（§9.2）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
