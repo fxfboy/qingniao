@@ -368,10 +368,25 @@ pub fn build_transfer_card(file_name: &str, size: u64, link: &str, ts: i64) -> V
 /// Unix 秒 → 本地时区 `YYYY-MM-DD HH:MM:SS`。
 /// 取不到本地偏移时回落 UTC（与 `lib.rs` 的 `now_str` 同口径）。
 fn fmt_local_time(unix: i64) -> String {
+    fmt_local_time_at(unix, time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC))
+}
+
+/// 同上，但偏移由调用方给定。
+///
+/// **为什么要有这个接缝**（M0a，方案 §10 出口 2）：`fmt_local_time` 读系统时区，
+/// 输出的卡片文案随运行环境变化——开发机（Asia/Shanghai）捕获的 golden 到 CI（UTC）必然不等。
+/// 实测确认：同一 `ts` 在 `TZ=Asia/Shanghai` 渲染 `2026-04-12 21:20:00`、在 `TZ=UTC` 渲染
+/// `2026-04-12 13:20:00`。（另：`time` 0.3 的 local-offset soundness 门禁「多线程会返回 Err」
+/// **在本机未复现**——起过 4 个线程后仍返回 `Ok(+08:00:00)`；但该行为依赖平台与 crate 版本，
+/// 不作为设计依据。）
+///
+/// 生产路径行为不变：`fmt_local_time` 仍按系统时区渲染；此函数只是把偏移变成入参，
+/// 让 golden 用例能用**固定偏移**断言格式，从而与时区、线程数都无关。
+fn fmt_local_time_at(unix: i64, offset: time::UtcOffset) -> String {
     let Ok(t) = time::OffsetDateTime::from_unix_timestamp(unix) else {
         return String::new();
     };
-    let t = t.to_offset(time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC));
+    let t = t.to_offset(offset);
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
         t.year(),
@@ -497,5 +512,96 @@ mod tests {
         assert!(e.quota_exhausted());
         let e = FeishuError { code: 0, msg: "".into(), http_status: 429 };
         assert!(e.retryable());
+    }
+
+    /* ===== M0a 出口 2：确定性面 golden（固定在重构前取值，见方案 §10） ===== */
+
+    /// 时间渲染格式逐字钉死，且**与时区无关**（偏移由入参给定）
+    #[test]
+    fn fmt_local_time_at_is_byte_stable() {
+        let ts = 1_700_000_000; // UTC 2023-11-14 22:13:20
+        let utc = time::UtcOffset::UTC;
+        let east8 = time::UtcOffset::from_hms(8, 0, 0).expect("合法偏移");
+        assert_eq!(fmt_local_time_at(ts, utc), "2023-11-14 22:13:20");
+        assert_eq!(fmt_local_time_at(ts, east8), "2023-11-15 06:13:20");
+        // 跨日 / 负偏移
+        let west5 = time::UtcOffset::from_hms(-5, 0, 0).expect("合法偏移");
+        assert_eq!(fmt_local_time_at(ts, west5), "2023-11-14 17:13:20");
+        // 越界时间戳退化为空串（不 panic）
+        assert_eq!(fmt_local_time_at(i64::MAX, utc), "");
+        assert_eq!(fmt_local_time_at(i64::MIN, utc), "");
+    }
+
+    /// 大小文案：边界值逐条钉死
+    #[test]
+    fn human_size_vectors() {
+        assert_eq!(human_size(0), "0 B");
+        assert_eq!(human_size(1), "1 B");
+        assert_eq!(human_size(1023), "1023 B");
+        assert_eq!(human_size(1024), "1 KB");
+        assert_eq!(human_size(2048), "2 KB");
+        assert_eq!(human_size(1024 * 1024 - 1), "1023 KB");
+        assert_eq!(human_size(1024 * 1024), "1.0 MB");
+        assert_eq!(human_size(381952), "373 KB");
+        assert_eq!(human_size(1024 * 1024 * 1024 - 1), "1024.0 MB");
+        assert_eq!(human_size(1024 * 1024 * 1024), "1.00 GB");
+        assert_eq!(human_size(100 * 1024 * 1024), "100.0 MB");
+    }
+
+    /// 图标映射：每个分支 + 大小写 + 多扩展名 + 无扩展名
+    #[test]
+    fn file_icon_vectors() {
+        for (name, want) in [
+            ("a.zip", "🗜️"), ("a.7z", "🗜️"), ("a.tar.gz", "🗜️"),
+            ("a.pdf", "📕"), ("a.docx", "📘"), ("a.xlsx", "📗"), ("a.csv", "📗"),
+            ("a.pptx", "📙"), ("a.png", "🖼️"), ("a.HEIC", "🖼️"),
+            ("a.mp4", "🎬"), ("a.mp3", "🎵"), ("a.log", "📄"), ("a.toml", "📄"),
+            ("a.zip.bak", "📎"), ("noext", "📎"), ("a.", "📎"), ("", "📎"),
+        ] {
+            assert_eq!(file_icon(name), want, "文件名 {name:?} 的图标不符");
+        }
+    }
+
+    /// footer 与卡片整体：**结构**与**除时间外的全部文案**逐字钉死。
+    /// 时间部分单独由 `fmt_local_time_at_is_byte_stable` 覆盖，因此本用例与时区无关。
+    #[test]
+    fn transfer_card_golden_without_time() {
+        let v = build_transfer_card("a.zip", 2048, "http://127.0.0.1:9876/dl?t=xyz", 1_700_000_000);
+        let s = serde_json::to_string_pretty(&v).expect("序列化");
+        // 把渲染出的时间替换成占位符——它是唯一随环境变化的字段。
+        // 不引入正则依赖：用固定前后缀定位，顺带断言时间格式长度。
+        let head = "⏳ 发送时间 ";
+        let tail = " · 链接 10 分钟内有效";
+        let i = s.find(head).expect("卡片应含发送时间") + head.len();
+        let j = i + s[i..].find(tail).expect("卡片应含过期提示");
+        let rendered = &s[i..j];
+        assert_eq!(rendered.len(), 19, "时间格式应为 YYYY-MM-DD HH:MM:SS，实际 {rendered:?}");
+        let s = format!("{}<TIME>{}", &s[..i], &s[j..]);
+        let want = serde_json::json!({
+            "card": {
+                "config": { "wide_screen_mode": true },
+                "elements": [
+                    { "tag": "div", "text": { "tag": "lark_md",
+                      "content": "🗜️ **[a.zip](http://127.0.0.1:9876/dl?t=xyz)**\n<font color='grey'>2 KB</font>" } },
+                    { "tag": "action", "actions": [
+                        { "tag": "button", "type": "primary",
+                          "text": { "tag": "plain_text", "content": "点击取回" },
+                          "url": "http://127.0.0.1:9876/dl?t=xyz" } ] },
+                    { "tag": "hr" },
+                    { "tag": "note", "elements": [ { "tag": "plain_text",
+                      "content": "⏳ 发送时间 <TIME> · 链接 10 分钟内有效，过期后请重新发送" } ] },
+                    { "tag": "note", "elements": [ { "tag": "plain_text",
+                      "content": "💻 取回只能在安装了青鸟的电脑上完成，手机端不支持" } ] }
+                ],
+                "header": { "template": "blue",
+                            "title": { "tag": "plain_text", "content": "文件传输" } }
+            },
+            "msg_type": "interactive"
+        });
+        assert_eq!(
+            serde_json::to_string_pretty(&want).expect("序列化"),
+            s,
+            "卡片 JSON 与重构前冻结值不一致——搬运过程中改动了卡片结构或文案"
+        );
     }
 }
