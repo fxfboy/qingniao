@@ -31,6 +31,8 @@ DOC_MAP=(
   "测试用例清单|https://fglabtop.feishu.cn/docx/L4jFda9aho3Vm0xJKNWc67dhnMh"
   "测试报告|https://fglabtop.feishu.cn/docx/RseMdoKeaoBNUNxEVDKc2FXRnVc"
   "项目导航|https://fglabtop.feishu.cn/docx/XHmadlsv2oCzrfxfm6fckIKLnab"
+  "架构图|https://fglabtop.feishu.cn/docx/P0kOdhpsloNsklxK9S9cVR0gnPe"
+  "分片AAD协议偏差说明|https://fglabtop.feishu.cn/docx/CXrAdRVfJoMip5xtmhvcch3Rnaf"
 )
 
 # 检查 lark-cli
