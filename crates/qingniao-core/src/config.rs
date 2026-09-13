@@ -392,6 +392,65 @@ fn load_unlocked(config_path: &Path) -> Result<LoadedConfig, String> {
 
 /// 锁内 read-modify-write：`f` 在最新快照上原地修改，随后原子落盘。
 /// 所有写操作（bot 增删改、history 追加）都必须走这里。
+/// R8（M0b）：save_config 的合并语义——`history` 以**磁盘值**为准原样保留，
+/// 其余字段整体替换（last-write-wins）。锁内执行；schema_version 由 save_unlocked 强制为 2。
+/// APP「保存设置」与「删除历史」之外的一切落盘路径都必须走这里或 [`modify`]。
+pub fn replace_preserving_history(config_path: &Path, new_value: Value) -> Result<(), String> {
+    modify(config_path, |cfg| {
+        let disk_history = cfg.raw.get("history").cloned();
+        let mut obj = match new_value {
+            Value::Object(m) => m,
+            _ => return Err("配置必须是 JSON 对象".into()),
+        };
+        obj.remove("history");
+        obj.remove("schema_version");
+        cfg.raw = obj;
+        if let Some(h) = disk_history {
+            cfg.raw.insert("history".into(), h);
+        }
+        Ok(())
+    })
+}
+
+/// R8（M0b）：锁内按 `time`+`kind` 定位并删除历史条目，返回删除条数。
+/// 历史条目无 id（§11 R8 合并语义栏），time 为 ISO8601（毫秒级）+ kind 组合在单机内唯一。
+pub fn delete_history_entry(config_path: &Path, time: &str, kind: &str) -> Result<usize, String> {
+    modify(config_path, |cfg| {
+        let arr = cfg
+            .raw
+            .get_mut("history")
+            .and_then(|v| v.as_array_mut())
+            .ok_or("history 缺失或不是数组")?;
+        let before = arr.len();
+        arr.retain(|r| {
+            r.get("time").and_then(|v| v.as_str()) != Some(time)
+                || r.get("kind").and_then(|v| v.as_str()) != Some(kind)
+        });
+        Ok(before - arr.len())
+    })
+}
+
+/// R8（M0b）：锁内追加历史条目（APP 侧 kind=file 记录的追加路径；HISTORY_CAP 由 push_history 强制）。
+pub fn append_history_item(config_path: &Path, rec: Value) -> Result<(), String> {
+    modify(config_path, |cfg| {
+        cfg.push_history(rec);
+        Ok(())
+    })
+}
+
+/// M0b 验收点⑤：配置文件存在但不可解析（损坏）→ true（文件缺失/不可读 → false）
+pub fn is_config_unparsable(config_path: &Path) -> bool {
+    match std::fs::read_to_string(config_path) {
+        Ok(text) => serde_json::from_str::<Value>(&text).is_err(),
+        Err(_) => false,
+    }
+}
+
+/// 判断错误串是否为「配置/状态文件被占用」（§5.4 kind=busy，退出码 2）
+pub fn is_busy_error(msg: &str) -> bool {
+    msg == ERR_CONFIG_BUSY
+}
+
 pub fn modify<T>(
     config_path: &Path,
     f: impl FnOnce(&mut Config) -> Result<T, String>,

@@ -39,6 +39,10 @@ impl CliFail {
     fn config(message: impl Into<String>) -> Self {
         CliFail { kind: SendErrorKind::Config, message: message.into() }
     }
+    /// 配置/状态文件锁被占用（M0b：§5.4 kind=busy，退出码 2，可重试）
+    fn busy(message: impl Into<String>) -> Self {
+        CliFail { kind: SendErrorKind::Busy, message: message.into() }
+    }
     fn from_send(f: SendFailure) -> Self {
         CliFail { kind: f.kind, message: f.message }
     }
@@ -341,6 +345,7 @@ fn kind_name(k: SendErrorKind) -> &'static str {
     match k {
         SendErrorKind::Usage => "usage",
         SendErrorKind::Config => "config",
+        SendErrorKind::Busy => "busy",
         SendErrorKind::Network => "network",
         SendErrorKind::Timeout => "timeout",
         SendErrorKind::Http => "http",
@@ -351,7 +356,13 @@ fn kind_name(k: SendErrorKind) -> &'static str {
 // ===== 配置读取辅助 =====
 
 fn load_or_fail(config_path: &Path) -> Result<LoadedConfig, CliFail> {
-    load(config_path).map_err(CliFail::config)
+    load(config_path).map_err(|e| {
+        if qingniao_core::config::is_busy_error(&e) {
+            CliFail::busy(e)
+        } else {
+            CliFail::config(e)
+        }
+    })
 }
 
 fn app_id_of(cfg: &Config) -> String {
@@ -862,7 +873,15 @@ pub fn cmd_doctor(config_path: &Path, as_json: bool) -> Result<Outcome, CliFail>
             }
         }
         Err(e) => {
-            checks.push(check("config", false, e));
+            // M0b 验收点⑤：区分「不可解析」与其它错误——前者给出可操作的修复指引
+            if qingniao_core::config::is_config_unparsable(config_path) {
+                checks.push(check("config", false, format!(
+                    "{e}\n配置文件不可解析：{}。请先备份该文件（改名即可），再用 `qingniao config path` 指向的位置重建配置（重新打开 APP 或 qingniao bot add）",
+                    config_path.display()
+                )));
+            } else {
+                checks.push(check("config", false, e));
+            }
             failed = true;
         }
     }

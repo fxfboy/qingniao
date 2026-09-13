@@ -12,3 +12,4 @@ pub mod crypto;
 pub mod engine;
 pub mod feishu;
 pub mod quota;
+pub mod statefile;

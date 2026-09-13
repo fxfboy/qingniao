@@ -18,7 +18,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -154,11 +154,60 @@ impl ChunkStore for FeishuChunks {
     }
 }
 
+/* ===================== 指纹锁（M0b：D24 跨进程单消费） ===================== */
+
+/// per-指纹 OS advisory lock：`<work_dir>/<指纹>.lock`。
+/// 锁顺序（§7 实现约束②）：指纹锁 → 状态文件锁，单向；guard 由
+/// `PendingDownload` 携带、`run_download_sync` 取出并持有到下载结束（实现约束①）。
+pub struct FingerprintLock {
+    /// 持有即持锁；字段本身无需读取（flock 生命周期绑定 fd）
+    #[allow(dead_code)]
+    file: File,
+}
+
+impl FingerprintLock {
+    /// 非阻塞获取；已被其他进程/任务持有 → `Ok(None)`（claim 映射为 `Busy`，U17 409）
+    fn try_acquire(work_dir: &std::path::Path, fingerprint: &str) -> Result<Option<Self>, String> {
+        let path = work_dir.join(format!("{fingerprint}.lock"));
+        let f = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|e| format!("创建指纹锁失败: {e}"))?;
+        match f.try_lock() {
+            Ok(()) => Ok(Some(Self { file: f })),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => Err(format!("指纹锁加锁失败: {e}")),
+        }
+    }
+
+    /// 清理孤儿锁文件（实现约束③，Engine::open 时执行）：
+    /// flock 随进程消亡，因此「当前能独占锁住」的 .lock 必然无人持有 → 删除。
+    fn sweep_orphans(work_dir: &std::path::Path) {
+        let Ok(entries) = std::fs::read_dir(work_dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "lock").unwrap_or(false) {
+                if let Ok(f) = OpenOptions::new().write(true).open(&path) {
+                    if f.try_lock().is_ok() {
+                        let _ = std::fs::remove_file(&path);
+                        // f drop → 解锁
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// 单任务控制块
 pub struct TaskHandle {
     pub cancel: Arc<AtomicBool>,
     #[allow(dead_code)]
     pub dir: &'static str, // "out" | "in"
+    /// 指纹锁 guard（M0b）：claim 成功即存入，`run_download_sync` 取出并持有到下载结束。
+    /// 放在 TaskHandle（不可克隆、Arc 共享）而非 PendingDownload（Clone）以保证独占语义。
+    pub fp_lock: Mutex<Option<FingerprintLock>>,
 }
 
 pub struct Engine {
@@ -173,8 +222,6 @@ pub struct Engine {
     tasks: Mutex<HashMap<String, Arc<TaskHandle>>>,
     /// 待确认下载会话：handle → PendingDownload（仅内存，随链接新鲜度窗口过期）
     sessions: Mutex<HashMap<String, PendingDownload>>,
-    /// per-指纹状态（§9.4 单消费）：Downloading / Done
-    fp_state: Mutex<HashMap<String, FpState>>,
     /// 已消费指纹缓存（consumed.json，30 天，§9.4 重放抑制第三道闸）
     consumed: Mutex<ConsumedCache>,
     /// 终态事件暂存（done/failed/cancelled）——前端注册监听前事件可能已发出，注册后轮询一次补偿
@@ -218,13 +265,6 @@ pub struct PendingDownload {
     /// 领取后分配的任务标识 / 取消旗标
     pub task_id: Option<String>,
     pub cancel: Option<Arc<AtomicBool>>,
-}
-
-/// 指纹级下载状态
-#[derive(Clone)]
-enum FpState {
-    Downloading,
-    Done { path: String },
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -294,6 +334,7 @@ impl Engine {
         std::fs::create_dir_all(&work_dir).map_err(|e| format!("创建 transfer 目录失败: {e}"))?;
         let quota = Quota::open(&work_dir)?;
         let consumed = Self::load_consumed(&work_dir);
+        FingerprintLock::sweep_orphans(&work_dir);
         Ok(Self {
             host,
             keys,
@@ -302,8 +343,7 @@ impl Engine {
             quota: Arc::new(quota),
             tasks: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
-            fp_state: Mutex::new(HashMap::new()),
-            consumed: Mutex::new(consumed),
+                    consumed: Mutex::new(consumed),
             final_events: Mutex::new(HashMap::new()),
         })
     }
@@ -370,7 +410,7 @@ impl Engine {
         self.tasks
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .insert(task_id.clone(), Arc::new(TaskHandle { cancel: cancel.clone(), dir: "out" }));
+            .insert(task_id.clone(), Arc::new(TaskHandle { cancel: cancel.clone(), dir: "out", fp_lock: Mutex::new(None) }));
 
         let host = self.host.clone();
         let quota = self.quota.clone();
@@ -567,18 +607,12 @@ impl Engine {
                 return Ok(ClaimResult::AlreadyDone { path: item.path.clone() });
             }
         }
-        // 单消费锁：同一指纹仅一个任务进入「消费中」
-        {
-            let mut states = self.fp_state.lock().unwrap_or_else(|p| p.into_inner());
-            match states.get(&pending.fingerprint) {
-                Some(FpState::Downloading) => return Err(ClaimError::Busy),
-                Some(FpState::Done { path, .. }) => {
-                    return Ok(ClaimResult::AlreadyDone { path: path.clone() });
-                }
-                None => {}
-            }
-            states.insert(pending.fingerprint.clone(), FpState::Downloading);
+        // 单消费锁（M0b：跨进程 OS advisory lock，D24）：被持有 → Busy（U17 409）
+        let fp_lock = match FingerprintLock::try_acquire(&self.work_dir, &pending.fingerprint) {
+            Ok(g) => g,
+            Err(_) => return Err(ClaimError::Busy),
         }
+        .ok_or(ClaimError::Busy)?;
         // handle 用后即焚
         self.sessions.lock().unwrap_or_else(|p| p.into_inner()).remove(handle);
 
@@ -587,7 +621,14 @@ impl Engine {
         self.tasks
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .insert(task_id.clone(), Arc::new(TaskHandle { cancel: cancel.clone(), dir: "in" }));
+            .insert(
+                task_id.clone(),
+                Arc::new(TaskHandle {
+                    cancel: cancel.clone(),
+                    dir: "in",
+                    fp_lock: Mutex::new(Some(fp_lock)),
+                }),
+            );
         Ok(ClaimResult::Start(PendingDownload::with_task(pending, task_id, cancel)))
     }
 
@@ -598,6 +639,14 @@ impl Engine {
     pub fn run_download_sync(&self, pending: &PendingDownload) -> Result<String, String> {
         let host = self.host.clone();
         let task_id = pending.task_id.clone().unwrap_or_else(|| crypto::hex(&crypto::random_bytes(8)));
+        // 指纹锁在本函数存活期内持有（成功/失败/取消都在此释放；失败后重试可重新 claim）
+        let _fp_guard = {
+            let tasks = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
+            match tasks.get(&task_id) {
+                Some(h) => h.fp_lock.lock().unwrap_or_else(|p| p.into_inner()).take(),
+                None => None, // 未走 claim 的调用方（如 CLI recv）无锁可持
+            }
+        };
         let cancel = pending.cancel.clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let env = &pending.env;
         let meta = &env.meta;
@@ -742,11 +791,7 @@ impl Engine {
             }
             Err(msg) => {
                 let state = if cancel.load(Ordering::Relaxed) { "cancelled" } else { "failed" };
-                // 释放指纹锁（失败后重试路径：重新 GET /dl → 新会话 → 断点续传）
-                self.fp_state
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .remove(&pending.fingerprint);
+                // 指纹锁随 _fp_guard drop 释放（失败后重试路径：重新 GET /dl → 新会话 → 断点续传）
                 // 取消：清理 .part 与侧车；失败：保留以便断点续传（§9.4/U13）
                 if state == "cancelled" {
                     self.cleanup_part(pending);
@@ -781,38 +826,48 @@ impl Engine {
 
     fn mark_consumed(&self, fingerprint: &str, path: &str) {
         let now = crypto::now_unix();
-        {
-            let mut c = self.consumed.lock().unwrap_or_else(|p| p.into_inner());
-            // 30 天保留：顺带清理过期项
-            c.items.retain(|_, i| now - i.at < 30 * 24 * 3600);
-            c.items.insert(fingerprint.to_string(), ConsumedItem { at: now, path: path.to_string() });
-            if let Ok(j) = serde_json::to_string_pretty(&*c) {
-                let tmp = self.work_dir.join("consumed.json.tmp");
-                if std::fs::write(&tmp, j).is_ok() {
-                    let _ = std::fs::rename(&tmp, self.work_dir.join("consumed.json"));
-                }
-            }
+        // 锁内重读磁盘（另一进程的已消费记录不得丢失，D24 ②）→ 合并 → 原子写
+        let merged = super::statefile::update::<ConsumedCache, _>(
+            &self.work_dir.join("consumed.json"),
+            |disk| {
+                let mut c: ConsumedCache = disk
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                c.items.retain(|_, i| now - i.at < 30 * 24 * 3600);
+                c.items.insert(
+                    fingerprint.to_string(),
+                    ConsumedItem { at: now, path: path.to_string() },
+                );
+                Ok(c)
+            },
+        );
+        if merged.is_err() {
+            log::warn!("consumed.json 落盘失败（内存缓存已更新）");
         }
-        // 指纹状态 → Done（幂等 200 的依据）
-        let mut states = self.fp_state.lock().unwrap_or_else(|p| p.into_inner());
-        states.insert(fingerprint.to_string(), FpState::Done { path: path.to_string() });
+        let mut c = self.consumed.lock().unwrap_or_else(|p| p.into_inner());
+        c.items.retain(|_, i| now - i.at < 30 * 24 * 3600);
+        c.items.insert(fingerprint.to_string(), ConsumedItem { at: now, path: path.to_string() });
     }
 
     /* ===================== 删除重试队列（§6.4） ===================== */
 
     fn queue_pending_deletes(&self, tokens: &[String]) {
         let path = self.work_dir.join("pending_deletes.json");
-        let mut list: Vec<String> = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        for t in tokens {
-            if !list.contains(t) {
-                list.push(t.clone());
+        let tokens = tokens.to_vec();
+        // 锁内重读合并 + 原子写（D24；另一进程的队列条目不得丢失）
+        let r = super::statefile::update::<Vec<String>, _>(&path, |disk| {
+            let mut list: Vec<String> = disk
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            for t in &tokens {
+                if !list.contains(t) {
+                    list.push(t.clone());
+                }
             }
-        }
-        if let Ok(j) = serde_json::to_string(&list) {
-            let _ = std::fs::write(&path, j);
+            Ok(list)
+        });
+        if r.is_err() {
+            log::warn!("pending_deletes.json 落盘失败");
         }
         log::warn!("删除分片失败 {} 个，已进入重试队列（定期清理兜底）", tokens.len());
     }
@@ -820,26 +875,37 @@ impl Engine {
     /// 启动时重试删除队列（删除请求已发出但响应丢失 → 404 即成功）
     pub fn retry_pending_deletes(&self, app_id: &str, app_secret: &str) {
         let path = self.work_dir.join("pending_deletes.json");
-        let list: Vec<String> = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        if list.is_empty() || app_id.is_empty() {
-            return;
-        }
-        let client = match FeishuClient::new(app_id, app_secret, self.quota.clone()) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let mut remain = Vec::new();
-        for t in list {
-            match client.delete_file(&t) {
-                Ok(()) => {}
-                Err(e) if e.http_status == 404 => {}
-                Err(_) => remain.push(t),
+        // 锁内重读（另一进程可能刚入队）→ 逐个重试（404 即成功）→ 原子写余量
+        let list: Vec<String> = {
+            let (guard, disk) = match super::statefile::with_exclusive(&path) {
+                Ok(x) => x,
+                Err(_) => return,
+            };
+            let list: Vec<String> = disk
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default();
+            if list.is_empty() || app_id.is_empty() {
+                drop(guard);
+                return;
             }
+            let client = match FeishuClient::new(app_id, app_secret, self.quota.clone()) {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let mut remain = Vec::new();
+            for t in &list {
+                match client.delete_file(t) {
+                    Ok(()) => {}
+                    Err(e) if e.http_status == 404 => {}
+                    Err(_) => remain.push(t.clone()),
+                }
+            }
+            let _ = super::statefile::atomic_write(&path, &serde_json::to_value(&remain).unwrap_or_default());
+            remain
+        };
+        if !list.is_empty() {
+            log::info!("删除重试后仍有 {} 个未清除", list.len());
         }
-        let _ = std::fs::write(&path, serde_json::to_string(&remain).unwrap_or_else(|_| "[]".into()));
     }
 
     /* ===================== 凭证来源（qingniao.json） ===================== */
