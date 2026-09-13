@@ -574,13 +574,13 @@ function fileCardHtml(rec){
   let st;
   if (rec.state === 'done' || rec.state === 'downloaded'){
     // 「N 分钟」须与 Rust `crypto::FRESHNESS_WINDOW_MINUTES`（链接有效期）一致
-    st = '<span class="st">' + OK_ICO + (dir === 'in' ? '已解密并保存到下载目录' : '取回链接已发到 ' + esc(rec.bot_name || '群') + ' · 10 分钟内有效') + '</span>' +
+    st = '<span class="st">' + OK_ICO + (dir === 'in' ? '已保存到下载目录' : '取回链接已发到 ' + esc(rec.bot_name || '群') + ' · 10 分钟内有效') + '</span>' +
          '<span class="bacts">' + (dir === 'in' ? '<button data-open-dir>打开目录</button>' : '<button class="hi" data-copy-link>复制链接</button>') + '</span>';
   } else if (rec.state === 'failed' || rec.state === 'cancelled'){
     st = '<span class="st">' + WARN_ICO + esc(rec.error || (rec.state === 'cancelled' ? '已取消' : '传输失败')) + '</span>' +
          '<span class="bacts"><button data-retry>重试</button></span>';
   } else {
-    st = '<span class="st" data-st>' + (dir === 'in' ? '解密中，完成后直接存到「下载」目录' : '本机加密后上传，飞书侧只有密文') + '</span>' +
+    st = '<span class="st" data-st>' + (dir === 'in' ? '正在下载，完成后保存到「下载」目录' : '端到端加密传输中') + '</span>' +
          '<span class="bacts"><button data-cancel>取消</button></span>';
   }
   return '<div class="' + cls + '" data-rec-fp="' + esc(rec.fingerprint || '') + '">' +
@@ -588,7 +588,7 @@ function fileCardHtml(rec){
       '<span class="fc-ico' + (dir === 'in' ? ' down' : '') + (rec.state === 'failed' || rec.state === 'cancelled' ? ' fail' : '') + '" aria-hidden="true">' + FILE_ICO + '</span>' +
       '<div class="fc-info"><b title="' + esc(rec.name) + '">' + esc(rec.name) + '</b>' +
         '<div class="fmeta"><span>' + fmtSize(rec.size) + '</span>' +
-        (running ? '<span class="live' + (dir === 'in' ? ' down' : '') + '" data-rate>' + (dir === 'in' ? '正在连接取回链接…' : '正在加密上传…') + '</span><span data-pct>' + pct + '%</span>' : '') +
+        (running ? '<span class="live' + (dir === 'in' ? ' down' : '') + '" data-rate>' + (dir === 'in' ? '正在连接取回链接…' : '正在上传…') + '</span><span data-pct>' + pct + '%</span>' : '') +
         '</div></div>' +
       (running ? '<button class="fc-cancel" data-cancel title="取消传输" aria-label="取消传输">' + X_ICO + '</button>' : '') +
     '</div>' +
@@ -768,7 +768,7 @@ function handleFile(file){
   $('#confirmName').textContent = file.name;
   $('#confirmName').title = file.name;
   const big = file.size > 100 * 1048576;
-  $('#confirmMeta').textContent = (file.size ? fmtSize(file.size) + ' · ' : '') + (big ? '超出单文件上限 100 MB' : '加密后单独发一条记录');
+  $('#confirmMeta').textContent = (file.size ? fmtSize(file.size) + ' · ' : '') + (big ? '超出单文件上限 100 MB' : '端到端加密 · 群里只出现一条取回链接');
   $('#confirmIconShape').innerHTML = big
     ? '<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/>'
     : '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/>';
