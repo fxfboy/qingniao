@@ -3042,15 +3042,12 @@ dependencies = [
 name = "qingniao"
 version = "0.5.0"
 dependencies = [
- "aes-gcm",
  "base64 0.22.1",
- "hmac",
  "keyring",
  "log",
  "objc2",
  "objc2-app-kit",
  "qingniao-core",
- "rand 0.8.8",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -3062,7 +3059,6 @@ dependencies = [
  "tauri-plugin-single-instance",
  "time",
  "tiny_http",
- "unicode-normalization",
 ]
 
 [[package]]
@@ -3079,13 +3075,19 @@ dependencies = [
 name = "qingniao-core"
 version = "0.5.0"
 dependencies = [
+ "aes-gcm",
  "base64 0.22.1",
  "hmac",
+ "keyring",
+ "log",
+ "rand 0.8.8",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
+ "time",
+ "unicode-normalization",
 ]
 
 [[package]]
