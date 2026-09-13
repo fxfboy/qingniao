@@ -525,17 +525,18 @@ mod tests {
 
     /* ===== M0a 出口 2：确定性面 golden（固定在重构前取值，见方案 §10） ===== */
 
-    /// 时间渲染格式逐字钉死，且**与时区无关**（偏移由入参给定）
+    /// 时间渲染格式逐字钉死，且**与时区无关**（偏移由入参给定）。
+    /// 精度为分钟（YYYY-MM-DD HH:MM）——卡片改版（1ea7f28）把秒精简掉了。
     #[test]
     fn fmt_local_time_at_is_byte_stable() {
         let ts = 1_700_000_000; // UTC 2023-11-14 22:13:20
         let utc = time::UtcOffset::UTC;
         let east8 = time::UtcOffset::from_hms(8, 0, 0).expect("合法偏移");
-        assert_eq!(fmt_local_time_at(ts, utc), "2023-11-14 22:13:20");
-        assert_eq!(fmt_local_time_at(ts, east8), "2023-11-15 06:13:20");
+        assert_eq!(fmt_local_time_at(ts, utc), "2023-11-14 22:13");
+        assert_eq!(fmt_local_time_at(ts, east8), "2023-11-15 06:13");
         // 跨日 / 负偏移
         let west5 = time::UtcOffset::from_hms(-5, 0, 0).expect("合法偏移");
-        assert_eq!(fmt_local_time_at(ts, west5), "2023-11-14 17:13:20");
+        assert_eq!(fmt_local_time_at(ts, west5), "2023-11-14 17:13");
         // 越界时间戳退化为空串（不 panic）
         assert_eq!(fmt_local_time_at(i64::MAX, utc), "");
         assert_eq!(fmt_local_time_at(i64::MIN, utc), "");
@@ -573,44 +574,46 @@ mod tests {
 
     /// footer 与卡片整体：**结构**与**除时间外的全部文案**逐字钉死。
     /// 时间部分单独由 `fmt_local_time_at_is_byte_stable` 覆盖，因此本用例与时区无关。
+    /// 基线在卡片 turquoise 改版合并时重捕（merge `7d7799b9`，M0c 式收尾）。
     #[test]
     fn transfer_card_golden_without_time() {
         let v = build_transfer_card("a.zip", 2048, "http://127.0.0.1:9876/dl?t=xyz", 1_700_000_000);
         let s = serde_json::to_string_pretty(&v).expect("序列化");
         // 把渲染出的时间替换成占位符——它是唯一随环境变化的字段。
         // 不引入正则依赖：用固定前后缀定位，顺带断言时间格式长度。
-        let head = "⏳ 发送时间 ";
-        let tail = " · 链接 10 分钟内有效";
+        let head = "⏳ ";
+        let tail = " 发出 · 过期后请让对方重新发送";
         let i = s.find(head).expect("卡片应含发送时间") + head.len();
         let j = i + s[i..].find(tail).expect("卡片应含过期提示");
         let rendered = &s[i..j];
-        assert_eq!(rendered.len(), 19, "时间格式应为 YYYY-MM-DD HH:MM:SS，实际 {rendered:?}");
+        assert_eq!(rendered.len(), 16, "时间格式应为 YYYY-MM-DD HH:MM，实际 {rendered:?}");
         let s = format!("{}<TIME>{}", &s[..i], &s[j..]);
         let want = serde_json::json!({
             "card": {
                 "config": { "wide_screen_mode": true },
+                "header": { "template": "turquoise",
+                            "title": { "tag": "plain_text", "content": "有一个文件等你取回" },
+                            "subtitle": { "tag": "plain_text", "content": "链接 10 分钟内有效" } },
                 "elements": [
                     { "tag": "div", "text": { "tag": "lark_md",
                       "content": "🗜️ **[a.zip](http://127.0.0.1:9876/dl?t=xyz)**\n<font color='grey'>2 KB</font>" } },
                     { "tag": "action", "actions": [
                         { "tag": "button", "type": "primary",
-                          "text": { "tag": "plain_text", "content": "点击取回" },
+                          "text": { "tag": "plain_text", "content": "取回文件" },
                           "url": "http://127.0.0.1:9876/dl?t=xyz" } ] },
                     { "tag": "hr" },
                     { "tag": "note", "elements": [ { "tag": "plain_text",
-                      "content": "⏳ 发送时间 <TIME> · 链接 10 分钟内有效，过期后请重新发送" } ] },
+                      "content": "💻 取回只能在安装了青鸟的电脑上完成，手机端不支持" } ] },
                     { "tag": "note", "elements": [ { "tag": "plain_text",
-                      "content": "💻 取回只能在安装了青鸟的电脑上完成，手机端不支持" } ] }
-                ],
-                "header": { "template": "blue",
-                            "title": { "tag": "plain_text", "content": "文件传输" } }
+                      "content": "⏳ <TIME> 发出 · 过期后请让对方重新发送" } ] }
+                ]
             },
             "msg_type": "interactive"
         });
         assert_eq!(
             serde_json::to_string_pretty(&want).expect("序列化"),
             s,
-            "卡片 JSON 与重构前冻结值不一致——搬运过程中改动了卡片结构或文案"
+            "卡片 JSON 与冻结基线不一致——改动卡片结构或文案必须显式重捕 golden"
         );
     }
 }
