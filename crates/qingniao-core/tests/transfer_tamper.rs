@@ -8,7 +8,7 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
 use base64::Engine as _;
-use qingniao_lib::transfer::crypto::{self, ChunkMeta, Envelope, Metadata};
+use qingniao_core::transfer::crypto::{self, ChunkMeta, Envelope, Metadata};
 use sha2::{Digest, Sha256};
 
 fn key() -> Vec<u8> {

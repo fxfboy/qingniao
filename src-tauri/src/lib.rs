@@ -2,19 +2,18 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::io::Write;
+use qingniao_core::keyring_store;
 use tauri::Manager;
 
 /// 常驻功能的模块划分（设计文档 dock/tray 常驻功能设计文档 v0.4）
 pub mod lifecycle;
 pub mod service;
 pub mod tray;
-/// 跨网文件传输（docs/文件传输功能设计文档.md v1.1）
+/// 跨网文件传输的 **APP 侧适配层**（实现已迁入 core；见 transfer/mod.rs）
+
 pub mod transfer;
 /// 本地 HTTP 服务（127.0.0.1 双路由，D14/D20）
 pub mod local_server;
-/// OS 凭据库封装（K / 密钥，D15/D21）
-pub mod keyring_store;
-
 use lifecycle::{ExitCoordinator, ExitState, FinalCleanup, QuitSource, QuitStep};
 use service::{
     LocalServiceStatus, PhaseAService, ServiceStatusProvider, TransferActivityProvider,
@@ -507,7 +506,10 @@ fn read_app_config(app: &tauri::AppHandle) -> AppConfig {
 
 /* ===================== 文件传输命令（P2 上传 / P3 下载与服务） ===================== */
 
-/// 服务实际绑定端口（仅 Running 时有值）；消息链接只用它生成（P0-3）
+/// 服务实际绑定端口（仅 Running 时有值）。
+///
+/// 注：M0a 期间仍用它生成取回链接（保持行为零变更）；**M0c 将改为 `configured_port`**
+/// 并把本函数降级为「本机作为接收端的可达性」描述（协议 v1.3 D23）。
 pub fn service_bound_port(app: &tauri::AppHandle) -> Option<u16> {
     let state = app.state::<AppState>();
     let snap = state.service.read().unwrap().status.snapshot();
@@ -515,16 +517,6 @@ pub fn service_bound_port(app: &tauri::AppHandle) -> Option<u16> {
         LocalServiceStatus::Running { bound_port } => Some(bound_port),
         _ => None,
     }
-}
-
-/// 全局 Quota 计数器（引擎内部使用）
-pub fn engine_quota_of(app: &tauri::AppHandle) -> Result<std::sync::Arc<transfer::quota::Quota>, String> {
-    let state = app.state::<AppState>();
-    state
-        .engine
-        .get()
-        .map(|e| e.quota.clone())
-        .ok_or_else(|| "传输引擎未初始化".to_string())
 }
 
 /// 上传任务发起（§8）：校验后立即返回 task_id，后台线程执行；进度走 transfer://progress
@@ -674,7 +666,8 @@ fn transfer_service_restart(app: tauri::AppHandle, port: u16) -> Result<serde_js
 /// 打开下载目录（filecard「打开目录」/ 托盘菜单共用）
 #[tauri::command]
 fn open_download_dir(app: tauri::AppHandle) -> Result<(), String> {
-    let dir = transfer::engine::download_dir_of(&app)?;
+    use transfer::engine::Host as _;
+    let dir = transfer::TauriHost::new(app.clone()).resolve_download_dir()?;
     use tauri_plugin_opener::OpenerExt;
     app.opener()
         .open_path(dir, None::<&str>)
@@ -1600,7 +1593,10 @@ pub fn run() {
             let work_dir = app.path().app_config_dir()
                 .map_err(|e| format!("无法定位配置目录: {e}"))?
                 .join("transfer");
-            let engine = transfer::engine::Engine::open(work_dir, app.handle().clone())
+            let engine = transfer::engine::Engine::open(
+                work_dir,
+                transfer::TauriHost::into_arc(app.handle().clone()),
+            )
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             let engine = std::sync::Arc::new(engine);
             let _ = app.state::<AppState>().engine.set(engine.clone());

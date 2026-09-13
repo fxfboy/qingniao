@@ -24,7 +24,71 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tauri::{AppHandle, Emitter, Manager};
+
+/* ===================== 宿主接口（M0a：全部 tauri 耦合收敛到这一点） ===================== */
+
+/// 引擎与宿主环境的**唯一**接口。
+///
+/// APP 传 Tauri 实现（`src-tauri/src/transfer/mod.rs` 的 `TauriHost`）；
+/// CLI 与测试传 [`FixedHost`]（固定值 + 事件丢弃）。
+///
+/// 这样 core 保持零 tauri 依赖，同时 APP 侧行为不变——原先直接调 `AppHandle` 的
+/// 五处（配置目录 / 下载目录 / 本地服务端口 / 进度事件 / 完成事件）逐一对应到本 trait。
+pub trait Host: Send + Sync {
+    /// `qingniao.json` 所在目录
+    fn config_dir(&self) -> Result<PathBuf, String>;
+    /// 下载落地目录（= 配置项，空则系统下载目录；不存在时创建）
+    fn resolve_download_dir(&self) -> Result<String, String>;
+    /// 本机本地服务当前实际绑定的端口；`None` = 未运行
+    fn service_bound_port(&self) -> Option<u16>;
+    /// 进度事件（`transfer://progress`）
+    fn progress(&self, payload: serde_json::Value);
+    /// 下载完成事件（`transfer://downloaded`）
+    fn downloaded(&self, payload: serde_json::Value);
+}
+
+/// CLI / 测试用宿主：固定值 + 事件丢弃。
+pub struct FixedHost {
+    pub config_dir: PathBuf,
+    /// `None` 或空串 ⇒ `$HOME/Downloads`
+    pub download_dir: Option<String>,
+    pub service_port: Option<u16>,
+}
+
+impl FixedHost {
+    pub fn new(config_dir: PathBuf) -> Self {
+        Self { config_dir, download_dir: None, service_port: None }
+    }
+    pub fn with_download_dir(mut self, dir: impl Into<String>) -> Self {
+        self.download_dir = Some(dir.into());
+        self
+    }
+    pub fn with_service_port(mut self, port: Option<u16>) -> Self {
+        self.service_port = port;
+        self
+    }
+}
+
+impl Host for FixedHost {
+    fn config_dir(&self) -> Result<PathBuf, String> { Ok(self.config_dir.clone()) }
+
+    fn resolve_download_dir(&self) -> Result<String, String> {
+        let dir = match self.download_dir.as_deref() {
+            Some(d) if !d.is_empty() => PathBuf::from(d),
+            // 不依赖宿主 API 的兜底（CLI 场景）；APP 侧仍走 Tauri 的系统下载目录解析
+            _ => {
+                let home = std::env::var_os("HOME").ok_or("无法定位 HOME 目录")?;
+                PathBuf::from(home).join("Downloads")
+            }
+        };
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建下载目录失败: {e}"))?;
+        Ok(dir.to_string_lossy().to_string())
+    }
+
+    fn service_bound_port(&self) -> Option<u16> { self.service_port }
+    fn progress(&self, _payload: serde_json::Value) {}
+    fn downloaded(&self, _payload: serde_json::Value) {}
+}
 
 /// 单任务控制块
 pub struct TaskHandle {
@@ -34,7 +98,7 @@ pub struct TaskHandle {
 }
 
 pub struct Engine {
-    app: AppHandle,
+    host: Arc<dyn Host>,
     /// <app_config_dir>/transfer
     work_dir: PathBuf,
     pub quota: Arc<Quota>,
@@ -140,12 +204,12 @@ pub struct Evaluated {
 }
 
 impl Engine {
-    pub fn open(work_dir: PathBuf, app: AppHandle) -> Result<Self, String> {
+    pub fn open(work_dir: PathBuf, host: Arc<dyn Host>) -> Result<Self, String> {
         std::fs::create_dir_all(&work_dir).map_err(|e| format!("创建 transfer 目录失败: {e}"))?;
         let quota = Quota::open(&work_dir)?;
         let consumed = Self::load_consumed(&work_dir);
         Ok(Self {
-            app,
+            host,
             work_dir,
             quota: Arc::new(quota),
             tasks: Mutex::new(HashMap::new()),
@@ -220,19 +284,20 @@ impl Engine {
             .unwrap_or_else(|p| p.into_inner())
             .insert(task_id.clone(), Arc::new(TaskHandle { cancel: cancel.clone(), dir: "out" }));
 
-        let app = self.app.clone();
+        let host = self.host.clone();
+        let quota = self.quota.clone();
         let engine = self.clone();
         let task_id2 = task_id.clone();
         std::thread::Builder::new()
             .name(format!("qn-upload-{task_id}"))
-            .spawn(move || match upload_inner(&app, &task_id2, &cancel, &req, &key, &app_id, &app_secret, size) {
+            .spawn(move || match upload_inner(host.as_ref(), &quota, &task_id2, &cancel, &req, &key, &app_id, &app_secret, size) {
                 Ok(link) => {
-                    emit_progress(&app, &task_id2, "out", "done", size, size, size, size, None, Some(&link), None);
+                    emit_progress(host.as_ref(), &task_id2, "out", "done", size, size, size, size, None, Some(&link), None);
                     engine.record_final(&task_id2, serde_json::json!({"state":"done","dir":"out","link":link}));
                 }
                 Err(msg) => {
                     let state = if cancel.load(Ordering::Relaxed) { "cancelled" } else { "failed" };
-                    emit_progress(&app, &task_id2, "out", state, 0, size, 0, 0, Some(&msg), None, None);
+                    emit_progress(host.as_ref(), &task_id2, "out", state, 0, size, 0, 0, Some(&msg), None, None);
                     engine.record_final(&task_id2, serde_json::json!({"state":state,"dir":"out","error":msg}));
                 }
             })
@@ -316,7 +381,7 @@ impl Engine {
         let key = crypto::key_from_hex(&ev.key_hex)?;
         let env: Envelope = open_payload(&key, &payload)?;
         // 解析下载目录（配置优先，默认系统下载目录；D5）
-        let download_dir = download_dir_of(&self.app)?;
+        let download_dir = self.host.resolve_download_dir()?;
         let handle = crypto::hex(&crypto::random_bytes(16));
         let now = crypto::now_unix();
         let expires_at = session_expires_at(env.meta.ts);
@@ -401,7 +466,7 @@ impl Engine {
     /// 同步执行下载（确认页 worker 线程 / 前端命令线程共用）。
     /// 返回最终落盘路径。进度经 transfer://progress 推送。
     pub fn run_download_sync(&self, pending: &PendingDownload) -> Result<String, String> {
-        let app = self.app.clone();
+        let host = self.host.clone();
         let task_id = pending.task_id.clone().unwrap_or_else(|| crypto::hex(&crypto::random_bytes(8)));
         let cancel = pending.cancel.clone().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let env = &pending.env;
@@ -496,7 +561,7 @@ impl Engine {
                 }
                 done += chunk.size;
                 let rate = (done as f64 / t0.elapsed().as_secs_f64().max(0.001)) as u64;
-                emit_progress(&app, &task_id, "in", "running", done, total, done, total, None, None, Some(rate));
+                emit_progress(host.as_ref(), &task_id, "in", "running", done, total, done, total, None, None, Some(rate));
             }
             // 完整落盘后强制刷盘
             part.sync_all().map_err(|e| format!("刷盘失败: {e}"))?;
@@ -535,19 +600,16 @@ impl Engine {
             Ok(final_path) => {
                 self.mark_consumed(&pending.fingerprint, &final_path);
                 self.tasks.lock().unwrap_or_else(|p| p.into_inner()).remove(&task_id);
-                emit_progress(&app, &task_id, "in", "done", total, total, total, total, None, None, None);
+                emit_progress(host.as_ref(), &task_id, "in", "done", total, total, total, total, None, None, None);
                 self.record_final(&task_id, serde_json::json!({"state":"done","dir":"in","final_path":final_path}));
                 // 浏览器取回无应用内记录，单独广播终态，前端据此补写历史
-                let _ = app.emit(
-                    "transfer://downloaded",
-                    serde_json::json!({
+                host.downloaded(serde_json::json!({
                         "task_id": task_id,
                         "name": meta.name,
                         "size": total,
                         "final_path": final_path,
                         "fingerprint": pending.fingerprint,
-                    }),
-                );
+                }));
                 Ok(final_path)
             }
             Err(msg) => {
@@ -562,7 +624,7 @@ impl Engine {
                     self.cleanup_part(pending);
                 }
                 self.tasks.lock().unwrap_or_else(|p| p.into_inner()).remove(&task_id);
-                emit_progress(&app, &task_id, "in", state, 0, total, 0, 0, Some(&msg), None, None);
+                emit_progress(host.as_ref(), &task_id, "in", state, 0, total, 0, 0, Some(&msg), None, None);
                 self.record_final(&task_id, serde_json::json!({"state":state,"dir":"in","error":msg}));
                 Err(msg)
             }
@@ -655,12 +717,7 @@ impl Engine {
     /* ===================== 凭证来源（qingniao.json） ===================== */
 
     fn app_id_of(&self) -> Result<String, String> {
-        let path = self
-            .app
-            .path()
-            .app_config_dir()
-            .map_err(|e| format!("无法定位配置目录: {e}"))?
-            .join("qingniao.json");
+        let path = self.host.config_dir()?.join("qingniao.json");
         let cfg: serde_json::Value = std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -669,12 +726,7 @@ impl Engine {
     }
 
     fn app_secret_of(&self) -> Result<String, String> {
-        let path = self
-            .app
-            .path()
-            .app_config_dir()
-            .map_err(|e| format!("无法定位配置目录: {e}"))?
-            .join("qingniao.json");
+        let path = self.host.config_dir()?.join("qingniao.json");
         let cfg: serde_json::Value = std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -696,25 +748,6 @@ impl PendingDownload {
 }
 
 /* ===================== 下载目录 / 工具（D5） ===================== */
-
-/// 下载目录 = 配置项，默认系统下载目录（目录不存在自动创建）
-pub fn download_dir_of(app: &AppHandle) -> Result<String, String> {
-    let cfg_path = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("无法定位配置目录: {e}"))?
-        .join("qingniao.json");
-    let configured: Option<String> = std::fs::read_to_string(&cfg_path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.pointer("/transfer/download_dir").and_then(|d| d.as_str()).map(String::from));
-    let dir = match configured {
-        Some(d) if !d.is_empty() => PathBuf::from(d),
-        _ => app.path().download_dir().map_err(|e| format!("无法定位系统下载目录: {e}"))?,
-    };
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建下载目录失败: {e}"))?;
-    Ok(dir.to_string_lossy().to_string())
-}
 
 /// 从链接（…/dl?t=payload）、被包装/百分号编码的链接，或裸 payload 提取载荷（§9.2 兜底入口）
 ///
@@ -798,7 +831,8 @@ fn hex_decode_16(s: &str) -> Result<Vec<u8>, String> {
 
 #[allow(clippy::too_many_arguments)]
 fn upload_inner(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
+    quota: &Arc<Quota>,
     task_id: &str,
     cancel: &Arc<AtomicBool>,
     req: &UploadRequest,
@@ -808,7 +842,7 @@ fn upload_inner(
     total: u64,
 ) -> Result<String, String> {
     let t0 = Instant::now();
-    let client = FeishuClient::new(app_id, app_secret, engine_quota(app)?)?;
+    let client = FeishuClient::new(app_id, app_secret, quota.clone())?;
 
     // 1. 确保云目录（§6.3）
     let root = client.root_folder().map_err(feishu_msg)?;
@@ -844,7 +878,7 @@ fn upload_inner(
         });
         done += plain_len;
         let rate = (done as f64 / t0.elapsed().as_secs_f64().max(0.001)) as u64;
-        emit_progress(app, task_id, "out", "running", done, total, done, total, None, None, Some(rate));
+        emit_progress(host, task_id, "out", "running", done, total, done, total, None, None, Some(rate));
     }
 
     // 4. 组装 metadata + payload（§8.3）
@@ -874,7 +908,7 @@ fn upload_inner(
     let payload = seal_payload(key, &env)?;
 
     // 5. 链接只用实际绑定端口（P0-3：禁止写死 configured_port）
-    let bound_port = super::service_bound_port(app)
+    let bound_port = host.service_bound_port()
         .ok_or_else(|| "本地服务未运行，无法生成取回链接：请先在设置中启动本地服务".to_string())?;
     let link = format!("http://127.0.0.1:{bound_port}/dl?t={payload}");
 
@@ -928,7 +962,7 @@ fn hex_sha256_stream(file: &mut std::fs::File) -> Result<String, String> {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_progress(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     task_id: &str,
     dir: &str,
     state: &str,
@@ -940,9 +974,7 @@ pub(crate) fn emit_progress(
     link: Option<&str>,
     rate_bps: Option<u64>,
 ) {
-    let _ = app.emit(
-        "transfer://progress",
-        serde_json::json!({
+    host.progress(serde_json::json!({
             "task_id": task_id,
             "dir": dir,
             "state": state,
@@ -953,13 +985,7 @@ pub(crate) fn emit_progress(
             "error": error,
             "link": link,
             "rate_bps": rate_bps,
-        }),
-    );
-}
-
-/// 从 AppState 取全局 Quota（FeishuClient 需要计数器）
-fn engine_quota(app: &tauri::AppHandle) -> Result<Arc<Quota>, String> {
-    super::engine_quota_of(app)
+    }));
 }
 
 #[allow(dead_code)]
