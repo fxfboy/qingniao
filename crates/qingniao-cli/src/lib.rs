@@ -16,7 +16,9 @@ use qingniao_core::send::{
     dispatch_send, iso8601_now, record_send, upload_image, RecordedSend, SendErrorKind,
     SendFailure,
 };
-use qingniao_core::transfer::engine::{DEFAULT_LOCAL_PORT, Engine, FixedHost, UploadRequest};
+use qingniao_core::transfer::engine::{
+    DEFAULT_LOCAL_PORT, Engine, FixedHost, Host as _, UploadRequest,
+};
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -154,6 +156,21 @@ enum TransferCmd {
         /// 覆盖链接端口（缺省读配置 transfer.configured_port，再缺省 9876）
         #[arg(long)]
         port: Option<u16>,
+        /// 结构化输出
+        #[arg(long)]
+        json: bool,
+    },
+    /// 取回文件（粘贴取回链接或裸 payload；C5 约束 a：与确认页完全同一路径）
+    Recv {
+        /// 取回链接（…/dl?t=…）或裸 payload（链接 10 分钟内有效，D8）
+        link: String,
+        /// 落盘目录（缺省：配置 transfer.download_dir，再缺省 ~/Downloads；
+        /// C12：须落在白名单内——默认下载目录或当前目录，--allow-any-path 放开）
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// 放开 --out 路径白名单（C12；将输出审计标记）
+        #[arg(long = "allow-any-path")]
+        allow_any_path: bool,
         /// 结构化输出
         #[arg(long)]
         json: bool,
@@ -321,6 +338,10 @@ pub fn run() -> i32 {
                 TransferCmd::Send { file, bot, port, json } => {
                     let path = resolve_config_path().map_err(CliFail::config)?;
                     cmd_transfer_send(&path, file, bot, port, json)
+                }
+                TransferCmd::Recv { link, out, allow_any_path, json } => {
+                    let path = resolve_config_path().map_err(CliFail::config)?;
+                    cmd_transfer_recv(&path, link, out, allow_any_path, json)
                 }
             },
             Cmd::Doctor { json } => {
@@ -655,6 +676,150 @@ pub fn cmd_transfer_send(
             "已发送: {name}（{size} 字节）\n取回链接: {}",
             outcome.link
         ))
+    })
+}
+
+// ===== transfer recv（M2）=====
+
+/// 取回文件：evaluate → create_session → claim → run_download_sync（C5 约束 a：
+/// 与 APP 确认页完全同一路径，不得另写下载逻辑）。CLI 不监听端口，纯粘贴取回（§2 非目标）。
+pub fn cmd_transfer_recv(
+    config_path: &Path,
+    link: String,
+    out: Option<PathBuf>,
+    allow_any_path: bool,
+    as_json: bool,
+) -> Result<Outcome, CliFail> {
+    use qingniao_core::transfer::engine::ClaimResult;
+    let loaded = load_or_fail(config_path)?;
+    print_warnings(&loaded.warnings);
+    let cfg = loaded.config;
+
+    let app_id = app_id_of(&cfg);
+    let app_secret = app_secret_of(&cfg);
+    if app_id.is_empty() || app_secret.is_empty() {
+        return Err(CliFail::config("未配置飞书应用凭证（App ID / App Secret）"));
+    }
+
+    let config_dir = config_path
+        .parent()
+        .ok_or_else(|| CliFail::config("配置路径异常：无父目录"))?
+        .to_path_buf();
+
+    // 默认下载目录（C12 白名单根之一）
+    let default_dir = {
+        let host = FixedHost::new(config_dir.clone());
+        host.resolve_download_dir().map_err(CliFail::config)?
+    };
+
+    // --out 白名单（C12：canonicalize 后须落在默认下载目录或 cwd 内；--allow-any-path 放开 + 审计）
+    let download_dir = match &out {
+        Some(p) => {
+            std::fs::create_dir_all(p)
+                .map_err(|e| CliFail::usage(format!("创建输出目录失败 {}: {e}", p.display())))?;
+            let canon = p
+                .canonicalize()
+                .map_err(|e| CliFail::usage(format!("解析输出目录失败: {e}")))?;
+            let cwd = std::env::current_dir().map_err(|e| CliFail::usage(format!("取当前目录失败: {e}")))?;
+            let in_whitelist = canon.starts_with(&default_dir) || canon.starts_with(cwd);
+            if !in_whitelist {
+                if !allow_any_path {
+                    return Err(CliFail::usage(format!(
+                        "--out 不在路径白名单内（默认下载目录 {} 或当前目录）；如确认可用 --allow-any-path 放开",
+                        default_dir
+                    )));
+                }
+                warn_stderr("审计：--allow-any-path 已使用，落盘目录不受白名单限制");
+            }
+            canon.to_string_lossy().to_string()
+        }
+        None => {
+            let configured = cfg
+                .raw
+                .get("transfer")
+                .and_then(|v| v.get("download_dir"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if configured.is_empty() {
+                default_dir // resolve_download_dir 的兜底结果（已创建）
+            } else {
+                configured.to_string()
+            }
+        }
+    };
+
+    let host = Arc::new(
+        FixedHost::new(config_dir.clone())
+            .with_download_dir(download_dir)
+            .with_configured_port(
+                cfg.raw
+                    .get("transfer")
+                    .and_then(|v| v.get("configured_port"))
+                    .and_then(|v| v.as_u64())
+                    .and_then(|p| u16::try_from(p).ok())
+                    .unwrap_or(DEFAULT_LOCAL_PORT),
+            ),
+    );
+    let engine = Engine::open(config_dir.join("transfer"), host).map_err(CliFail::config)?;
+
+    // C5 约束 a：与 /dl 完全同一路径
+    let ev = engine.evaluate_payload(&link).map_err(|m| CliFail {
+        kind: if m.contains("未配置") || m.contains("尚未配置") {
+            SendErrorKind::Config
+        } else {
+            SendErrorKind::Feishu
+        },
+        message: m,
+    })?;
+    let view = engine.create_session(&link, ev).map_err(CliFail::config)?;
+    let (name, size) = (view.name.clone(), view.size);
+
+    let final_path = match engine.claim_session(&view.handle).map_err(|e| match e {
+        qingniao_core::transfer::engine::ClaimError::Busy => {
+            CliFail::busy("该文件正在被取回（另一任务持有指纹锁）")
+        }
+        qingniao_core::transfer::engine::ClaimError::Expired => {
+            CliFail { kind: SendErrorKind::Feishu, message: "链接已过期（10 分钟内有效），请让对方重新发送".into() }
+        }
+        qingniao_core::transfer::engine::ClaimError::NotFound => {
+            CliFail::usage("会话不存在：请重新粘贴链接")
+        }
+    })? {
+        ClaimResult::AlreadyDone { path } => {
+            warn_stderr(&format!("该文件此前已取回过，直接回放: {path}"));
+            path
+        }
+        ClaimResult::Start(mut pending) => engine
+            .run_download_sync(&mut pending)
+            .map_err(|m| CliFail { kind: SendErrorKind::Feishu, message: m })?,
+    };
+
+    // 历史：dir=in 条目与 APP 同形
+    let rec = json!({
+        "time": iso8601_now(now_secs()),
+        "kind": "file",
+        "dir": "in",
+        "name": name,
+        "size": size,
+        "state": "done",
+        "bytes_done": size,
+        "final_path": final_path,
+    });
+    if let Err(e) = record_send(config_path, rec) {
+        warn_stderr(&format!("取回历史写入失败: {e}"));
+    }
+
+    Ok(if as_json {
+        Outcome::ok_json(json!({
+            "ok": true,
+            "kind": "transfer_recv",
+            "final_path": final_path,
+            "name": name,
+            "size": size,
+        }))
+    } else {
+        Outcome::ok_text(format!("已取回: {name}（{size} 字节）
+保存位置: {final_path}"))
     })
 }
 
