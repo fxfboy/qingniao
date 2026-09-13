@@ -13,11 +13,14 @@ use qingniao_core::config::{
 };
 use qingniao_core::message::{build_payload, detect_type, MsgType};
 use qingniao_core::send::{
-    dispatch_send, record_send, upload_image, RecordedSend, SendErrorKind, SendFailure,
+    dispatch_send, iso8601_now, record_send, upload_image, RecordedSend, SendErrorKind,
+    SendFailure,
 };
+use qingniao_core::transfer::engine::{DEFAULT_LOCAL_PORT, Engine, FixedHost, UploadRequest};
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 
@@ -123,8 +126,31 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// 文件传输（CLI 文件传输方案 M1+）
+    Transfer {
+        #[command(subcommand)]
+        action: TransferCmd,
+    },
     /// 环境自检（无副作用）
     Doctor {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TransferCmd {
+    /// 发送文件到群（生成取回链接的交互式卡片）
+    Send {
+        /// 要发送的文件（单文件 ≤ 100 MB，D18）
+        file: PathBuf,
+        /// 目标机器人（id > 名称 > 下标）；缺省用默认机器人
+        #[arg(short, long)]
+        bot: Option<String>,
+        /// 覆盖链接端口（缺省读配置 transfer.configured_port，再缺省 9876）
+        #[arg(long)]
+        port: Option<u16>,
+        /// 结构化输出
         #[arg(long)]
         json: bool,
     },
@@ -287,6 +313,12 @@ pub fn run() -> i32 {
                 let path = resolve_config_path().map_err(CliFail::config)?;
                 cmd_history(&path, limit, json)
             }
+            Cmd::Transfer { action } => match action {
+                TransferCmd::Send { file, bot, port, json } => {
+                    let path = resolve_config_path().map_err(CliFail::config)?;
+                    cmd_transfer_send(&path, file, bot, port, json)
+                }
+            },
             Cmd::Doctor { json } => {
                 let path = resolve_config_path().map_err(CliFail::config)?;
                 cmd_doctor(&path, json)
@@ -503,6 +535,119 @@ fn default_secret_for_dry_run(cfg: &Config, bot_key: Option<&str>) -> String {
         None => cfg.default_bot(),
     };
     bot.map(|b| b.secret).unwrap_or_default()
+}
+
+// ===== transfer send（M1）=====
+
+/// 发送文件：加密上传 Drive → 生成取回链接 → 交互式卡片发群。
+/// 数据路径不经本机 HTTP 服务；链接端口为配置值（D23），供**接收端**拨号。
+pub fn cmd_transfer_send(
+    config_path: &Path,
+    file: PathBuf,
+    bot_key: Option<String>,
+    port: Option<u16>,
+    as_json: bool,
+) -> Result<Outcome, CliFail> {
+    let loaded = load_or_fail(config_path)?;
+    print_warnings(&loaded.warnings);
+    let cfg = loaded.config;
+
+    // 目标机器人 + URL 策略（与 send 同一语义：默认白名单）
+    let bot = match bot_key.as_deref() {
+        Some(k) => cfg
+            .find_bot(k)
+            .ok_or_else(|| CliFail::usage(format!("未找到机器人: {k}")))?,
+        None => cfg.default_bot().ok_or_else(|| {
+            CliFail::config("未配置机器人，请先 qingniao bot add 或在 APP 中添加")
+        })?,
+    };
+    check_url_policy(&bot.url, false).map_err(CliFail::usage)?;
+
+    let app_id = app_id_of(&cfg);
+    let app_secret = app_secret_of(&cfg);
+    if app_id.is_empty() || app_secret.is_empty() {
+        return Err(CliFail::config(
+            "未配置飞书应用凭证（App ID / App Secret）",
+        ));
+    }
+
+    let meta = std::fs::metadata(&file)
+        .map_err(|e| CliFail::usage(format!("无法读取文件 {}: {e}", file.display())))?;
+    let size = meta.len();
+
+    let config_dir = config_path
+        .parent()
+        .ok_or_else(|| CliFail::config("配置路径异常：无父目录"))?
+        .to_path_buf();
+    let configured_port = port.unwrap_or_else(|| {
+        cfg.raw
+            .get("transfer")
+            .and_then(|v| v.get("configured_port"))
+            .and_then(|v| v.as_u64())
+            .and_then(|p| u16::try_from(p).ok())
+            .unwrap_or(DEFAULT_LOCAL_PORT)
+    });
+    let host = Arc::new(FixedHost::new(config_dir.clone()).with_configured_port(configured_port));
+    let engine =
+        Engine::open(config_dir.join("transfer"), host).map_err(CliFail::config)?;
+
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+
+    let outcome = engine
+        .send_file_sync(&UploadRequest {
+            path: file.to_string_lossy().to_string(),
+            webhook_url: bot.url.clone(),
+            webhook_secret: bot.secret.clone(),
+        })
+        .map_err(|m| CliFail {
+            kind: if m.contains("未配置") || m.contains("尚未配置") {
+                SendErrorKind::Config
+            } else {
+                SendErrorKind::Feishu
+            },
+            message: m,
+        })?;
+
+    // 历史：与 APP 的 kind=file 条目同形（一次同步发送直接落终态）
+    let rec = json!({
+        "time": iso8601_now(now_secs()),
+        "kind": "file",
+        "dir": "out",
+        "name": name,
+        "size": size,
+        "state": "done",
+        "bytes_done": size,
+        "bot_name": bot.name,
+        "link": outcome.link,
+    });
+    if let Err(e) = record_send(config_path, rec) {
+        warn_stderr(&format!("发送历史写入失败: {e}"));
+    }
+
+    if let Some(w) = &outcome.warning {
+        warn_stderr(w);
+    }
+    Ok(if as_json {
+        Outcome::ok_json(json!({
+            "ok": true,
+            "kind": "transfer_sent",
+            "link": outcome.link,
+            "warning": outcome.warning,
+            "name": name,
+            "size": size,
+            "bot": bot.name,
+            "port": configured_port,
+        }))
+    } else {
+        Outcome::ok_text(format!(
+            "已发送: {name}（{size} 字节）\n取回链接: {}",
+            outcome.link
+        ))
+    })
 }
 
 // ===== bot =====
