@@ -90,6 +90,57 @@ impl Host for FixedHost {
     fn downloaded(&self, _payload: serde_json::Value) {}
 }
 
+/* ===================== 密钥来源（U7 注入接缝） ===================== */
+
+/// 传输密钥来源。生产实现读 OS 凭据库（[`KeyringKeys`]）；
+/// 测试 / CI 注入固定值——否则构造过期 payload 就得写真实主密钥条目（U7，方案 §15「排序修正」）。
+/// M3 的「keyring 抽 trait」在此接缝上正式化。
+pub trait KeySource: Send + Sync {
+    fn current(&self) -> Result<Option<String>, String>;
+    fn previous(&self) -> Result<Option<String>, String>;
+}
+
+/// 生产实现：OS 凭据库（`keyring_store`，SERVICE `com.qingniao.transfer`）
+pub struct KeyringKeys;
+
+impl KeySource for KeyringKeys {
+    fn current(&self) -> Result<Option<String>, String> { keyring_store::get_current() }
+    fn previous(&self) -> Result<Option<String>, String> { keyring_store::get_previous() }
+}
+
+/* ===================== 分片云端存取（U13 可控失败点） ===================== */
+
+/// 分片的云端拉取 / 删除。生产实现走 [`FeishuClient`]（私有 [`FeishuChunks`] 包装）；
+/// 测试 / CI 注入脚本化实现——即方案 P2-6 要求的 U13「本地 stub 最小形态」。
+pub trait ChunkStore: Send + Sync {
+    /// 拉取密文分片
+    fn fetch(&self, token: &str) -> Result<Vec<u8>, String>;
+    /// 删除云端分片（下载即删 D11；Err 进重试队列）
+    fn delete(&self, token: &str) -> Result<(), String>;
+}
+
+/// 生产实现：FeishuClient 的分片读写（错误映射与去 tauri 化前逐字一致）
+struct FeishuChunks {
+    client: FeishuClient,
+}
+
+impl ChunkStore for FeishuChunks {
+    fn fetch(&self, token: &str) -> Result<Vec<u8>, String> {
+        self.client.download_chunk(token).map_err(|e| {
+            if e.http_status == 404 {
+                "分片已被删除（可能已被取回或清理），请对方重新上传".to_string()
+            } else if e.http_status == 403 {
+                "无下载权限：请检查应用权限配置".to_string()
+            } else {
+                e.to_string()
+            }
+        })
+    }
+    fn delete(&self, token: &str) -> Result<(), String> {
+        self.client.delete_file(token).map_err(|e| e.to_string())
+    }
+}
+
 /// 单任务控制块
 pub struct TaskHandle {
     pub cancel: Arc<AtomicBool>,
@@ -99,6 +150,10 @@ pub struct TaskHandle {
 
 pub struct Engine {
     host: Arc<dyn Host>,
+    /// 密钥来源（U7 注入接缝；默认 [`KeyringKeys`]）
+    keys: Arc<dyn KeySource>,
+    /// 分片云端存取覆盖（U13 stub；`None` = FeishuClient 生产路径）
+    chunk_store: Option<Arc<dyn ChunkStore>>,
     /// <app_config_dir>/transfer
     work_dir: PathBuf,
     pub quota: Arc<Quota>,
@@ -174,6 +229,7 @@ pub enum ClaimResult {
     AlreadyDone { path: String },
 }
 
+#[derive(Debug)]
 pub enum ClaimError {
     Busy,
     Expired,
@@ -198,6 +254,7 @@ fn session_expires_at(ts: i64) -> i64 {
 }
 
 /// payload 校验结果（无副作用）
+#[derive(Debug)]
 pub struct Evaluated {
     pub fingerprint: String,
     pub key_hex: String,
@@ -205,11 +262,23 @@ pub struct Evaluated {
 
 impl Engine {
     pub fn open(work_dir: PathBuf, host: Arc<dyn Host>) -> Result<Self, String> {
+        Self::open_with(work_dir, host, Arc::new(KeyringKeys), None)
+    }
+
+    /// 显式注入密钥来源与分片存取（测试 / CI 用；生产路径走 [`Engine::open`]）
+    pub fn open_with(
+        work_dir: PathBuf,
+        host: Arc<dyn Host>,
+        keys: Arc<dyn KeySource>,
+        chunk_store: Option<Arc<dyn ChunkStore>>,
+    ) -> Result<Self, String> {
         std::fs::create_dir_all(&work_dir).map_err(|e| format!("创建 transfer 目录失败: {e}"))?;
         let quota = Quota::open(&work_dir)?;
         let consumed = Self::load_consumed(&work_dir);
         Ok(Self {
             host,
+            keys,
+            chunk_store,
             work_dir,
             quota: Arc::new(quota),
             tasks: Mutex::new(HashMap::new()),
@@ -340,8 +409,8 @@ impl Engine {
             return Err("载荷超出 20 KB 上限".into());
         }
         // 按 kid 选择 K：先试 current，再试 previous（§12.3；30 天保留期由 keyring 层强制）
-        let cur = keyring_store::get_current()?;
-        let prev = keyring_store::get_previous()?;
+        let cur = self.keys.current()?;
+        let prev = self.keys.previous()?;
         let mut last_err: Option<String> = None;
         for hex_key in [cur.as_deref(), prev.as_deref()].into_iter().flatten() {
             let key = crypto::key_from_hex(hex_key)?;
@@ -475,7 +544,13 @@ impl Engine {
         let t0 = Instant::now();
 
         let result = (|| -> Result<String, String> {
-            let client = FeishuClient::new(&pending.app_id, &pending.app_secret, self.quota.clone())?;
+            // 分片来源：测试注入的 stub 优先（U13）；生产走 FeishuClient
+            let store: Arc<dyn ChunkStore> = match &self.chunk_store {
+                Some(s) => s.clone(),
+                None => Arc::new(FeishuChunks {
+                    client: FeishuClient::new(&pending.app_id, &pending.app_secret, self.quota.clone())?,
+                }),
+            };
             let dek = base64::engine::general_purpose::URL_SAFE_NO_PAD
                 .decode(&env.dek)
                 .map_err(|_| "DEK 解码失败".to_string())?;
@@ -531,15 +606,7 @@ impl Engine {
                 if sidecar.completed.contains(&chunk.n) {
                     continue;
                 }
-                let sealed = client.download_chunk(&chunk.t).map_err(|e| {
-                    if e.http_status == 404 {
-                        "分片已被删除（可能已被取回或清理），请对方重新上传".to_string()
-                    } else if e.http_status == 403 {
-                        "无下载权限：请检查应用权限配置".to_string()
-                    } else {
-                        e.to_string()
-                    }
-                })?;
+                let sealed = store.fetch(&chunk.t)?;
                 let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD
                     .decode(&chunk.nonce)
                     .map_err(|_| "分片 nonce 解码失败".to_string())?;
@@ -585,7 +652,7 @@ impl Engine {
             // 下载即删（D11）：校验通过后删除云端全部分片；失败进重试队列
             let mut failed_deletes: Vec<String> = Vec::new();
             for chunk in &meta.chunks {
-                if client.delete_file(&chunk.t).is_err() {
+                if store.delete(&chunk.t).is_err() {
                     failed_deletes.push(chunk.t.clone());
                 }
             }
