@@ -587,7 +587,19 @@ pub fn cmd_transfer_send(
             .and_then(|p| u16::try_from(p).ok())
             .unwrap_or(DEFAULT_LOCAL_PORT)
     });
-    let host = Arc::new(FixedHost::new(config_dir.clone()).with_configured_port(configured_port));
+    // 服务在运行 → 告警不出现。CLI 不持有服务的运行时状态，用 TCP 探测代替：
+    // 探测成功则把端口回填给 Host，Engine 的 M0c 告警即静默。
+    let service_port = std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], configured_port)),
+        std::time::Duration::from_millis(500),
+    )
+    .ok()
+    .map(|_| configured_port);
+    let host = Arc::new(
+        FixedHost::new(config_dir.clone())
+            .with_configured_port(configured_port)
+            .with_service_port(service_port),
+    );
     let engine =
         Engine::open(config_dir.join("transfer"), host).map_err(CliFail::config)?;
 
