@@ -311,6 +311,16 @@
               <span class="name">bot:v3:info</span>
               <span class="ok-txt">可访问</span>
             </div>
+            <div class="perm" id="permUpload">
+              <span class="pdot"></span>
+              <span class="name">im:resource:upload</span>
+              <span class="ok-txt" id="permUploadStatus">检测中…</span>
+            </div>
+          </div>
+          <div class="perm-hint" id="connPermHint" hidden>
+            <div class="perm-hint-title">缺少图片上传权限</div>
+            <div class="perm-hint-desc">上传图片需要 <code>im:resource:upload</code> 权限。点击下方按钮前往飞书开放平台申请，<b>申请后必须发布新版本</b>才能生效。</div>
+            <button class="btn-primary perm-apply-btn" id="applyPermBtn">申请 im:resource:upload 权限 ↗</button>
           </div>
         </div>
 

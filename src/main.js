@@ -648,6 +648,10 @@ const connIcon    = $('#connIcon');
 const connHeadTxt = $('#connHeadTxt');
 const connTime    = $('#connTime');
 const connGrid    = $('#connGrid');
+const permUpload       = $('#permUpload');
+const permUploadStatus = $('#permUploadStatus');
+const connPermHint     = $('#connPermHint');
+const applyPermBtn     = $('#applyPermBtn');
 const testConnBtn = $('#testConnBtn');
 const testConnLabel = $('#testConnLabel');
 const CONN_ICON_OK   = '<path d="M20 6L9 17l-5-5"/>';
@@ -660,9 +664,29 @@ function setConnCard(state, text, time){
   connHeadTxt.textContent = text;
   connTime.textContent = time || '';
   connGrid.hidden = state !== 'ok';
+  if(state !== 'ok'){ resetUploadPerm(); }
 }
 function resetConnCard(){
   setConnCard('idle', '未连接 · 填写凭证后点击「测试连接」');
+}
+function resetUploadPerm(){
+  if(permUpload){ permUpload.classList.remove('fail'); permUploadStatus.textContent = '检测中…'; }
+  if(connPermHint){ connPermHint.hidden = true; }
+}
+function updateUploadPerm(has, applyUrl){
+  if(!permUpload) return;
+  if(has){
+    permUpload.classList.remove('fail');
+    permUploadStatus.textContent = '已开通';
+    connPermHint.hidden = true;
+  } else {
+    permUpload.classList.add('fail');
+    permUploadStatus.textContent = '未开通';
+    connPermHint.hidden = false;
+    if(applyUrl && applyPermBtn){
+      applyPermBtn.onclick = () => openExternal(applyUrl);
+    }
+  }
 }
 let testingConn = false;
 async function runConnTest(){
@@ -678,8 +702,9 @@ async function runConnTest(){
   testConnLabel.textContent = '测试中…';
   try{
     if(!invoke) throw 'Tauri 环境不可用';
-    const appName = await invoke('test_connection', {appId, appSecret});
-    setConnCard('ok', '已连接 · ' + appName, '刚刚校验');
+    const result = await invoke('test_connection', {appId, appSecret});
+    setConnCard('ok', '已连接 · ' + result.app_name, '刚刚校验');
+    updateUploadPerm(result.has_upload_permission, result.apply_url);
   }catch(e){
     const msg = typeof e === 'string' ? e : (e && e.message) || '未知错误';
     setConnCard('err', '连接失败 · ' + msg);
