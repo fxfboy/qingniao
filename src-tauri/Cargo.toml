@@ -1,6 +1,6 @@
 [package]
 name = "qingniao"
-version = "0.3.0"
+version = "0.4.0"
 description = "青鸟 · 飞书消息助手 — 向飞书自定义机器人发送各种格式消息"
 authors = ["fuxinf"]
 edition = "2021"
@@ -31,3 +31,9 @@ base64 = "0.22"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 # std + alloc：`log::set_boxed_logger` 需要 alloc feature（0.4.34 默认特性不含它）
 log = { version = "0.4", features = ["std", "alloc"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# 仅用于恢复 Dock 图标：切回 Regular 后系统会丢失应用图标（见 tray.rs restore_dock_icon）。
+# 与 tauri 传递引入的版本保持一致，不产生重复编译。
+objc2 = "0.6"
+objc2-app-kit = "0.3"

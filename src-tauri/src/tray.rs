@@ -203,3 +203,53 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<TrayHandles> {
 
     Ok(TrayHandles { status_item })
 }
+
+/// macOS：切换 Dock 可见性与激活策略（仿 cc-switch `tray.rs` 的 `apply_tray_policy`）。
+///
+/// 主窗口隐藏时切 `Accessory` 并隐藏 Dock 图标，应用退居纯托盘常驻；
+/// 恢复窗口时切回 `Regular`，Dock 图标随之恢复（`RunEvent::Reopen` 也依赖它）。
+/// 两个调用都允许失败（如非主线程时机），只记日志不上抛——托盘常驻不受影响。
+#[cfg(target_os = "macos")]
+pub fn apply_dock_policy(app: &tauri::AppHandle, dock_visible: bool) {
+    use tauri::ActivationPolicy;
+
+    let policy = if dock_visible {
+        ActivationPolicy::Regular
+    } else {
+        ActivationPolicy::Accessory
+    };
+
+    if let Err(err) = app.set_dock_visibility(dock_visible) {
+        log::warn!("设置 Dock 显示状态失败: {err}");
+    }
+    if let Err(err) = app.set_activation_policy(policy) {
+        log::warn!("设置激活策略失败: {err}");
+    }
+
+    if dock_visible {
+        restore_dock_icon();
+    }
+}
+
+/// 从 `Accessory` 切回 `Regular` 后，macOS 会重建 Dock tile，
+/// 图标回落为通用可执行文件图标（黑色 "exec"）。
+///
+/// 但 `NSApplication.applicationIcon` 属性仍持有启动时从 Info.plist
+/// 加载的原图——这里把它**重新 set 一遍**，强制 Dock 重新取图。
+/// 只能在主线程调用（Tauri 的窗口事件 / 托盘菜单回调都在主线程触发）。
+#[cfg(target_os = "macos")]
+fn restore_dock_icon() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+
+    // MainThreadMarker::new()：安全的运行时主线程判定，非主线程返回 None
+    let Some(mtm) = MainThreadMarker::new() else {
+        log::warn!("restore_dock_icon 不在主线程，跳过");
+        return;
+    };
+    // sharedApplication 带有 MainThreadMarker 参数，绑定本身即安全
+    let ns_app = NSApplication::sharedApplication(mtm);
+    let icon = ns_app.applicationIconImage();
+    // setApplicationIconImage 要求主线程，绑定标为 unsafe；由上方 mtm 保证
+    unsafe { ns_app.setApplicationIconImage(icon.as_deref()) };
+}

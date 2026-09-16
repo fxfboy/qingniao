@@ -610,6 +610,11 @@ pub fn show_main_window(app: &tauri::AppHandle) {
             let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();
+            // 与 CloseRequested 隐藏路径配对：恢复任务栏/Dock 图标
+            #[cfg(target_os = "windows")]
+            let _ = window.set_skip_taskbar(false);
+            #[cfg(target_os = "macos")]
+            tray::apply_dock_policy(app, true);
         }
         None => log::warn!("主窗口不存在，无法恢复"),
     }
@@ -859,11 +864,17 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // §6 / D2：只拦截主窗口；prevent_close + hide，正常路径从不销毁重建
+            // §6 / D2：只拦截主窗口；prevent_close + hide，正常路径从不销毁重建。
+            // 隐藏后还要让任务栏/Dock 图标一并消失（仿 cc-switch），
+            // 应用退居纯托盘常驻；恢复窗口时在 show_main_window 里切回。
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
                     let _ = window.hide();
+                    #[cfg(target_os = "windows")]
+                    let _ = window.set_skip_taskbar(true);
+                    #[cfg(target_os = "macos")]
+                    tray::apply_dock_policy(window.app_handle(), false);
                 }
             }
         })
