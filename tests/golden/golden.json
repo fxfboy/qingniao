@@ -1,0 +1,1031 @@
+{
+  "version": 1,
+  "generator": "scripts/capture-golden.mjs",
+  "source": "src/message.js",
+  "cases": {
+    "hmacSign": [
+      {
+        "name": "doc-example",
+        "input": {
+          "timestamp": "1700000000",
+          "secret": "test-secret"
+        },
+        "output": "mbm4Y4oluIPQ00qlBIhX8vAZ0EKv3nw0LuTb91jPL84="
+      },
+      {
+        "name": "case-2",
+        "input": {
+          "timestamp": "1754290000",
+          "secret": "abc123"
+        },
+        "output": "Mc7W2s7udaASnLAdPRF/sAArgUZNC/dqAKv9cUZdjPg="
+      },
+      {
+        "name": "empty-secret",
+        "input": {
+          "timestamp": "1700000000",
+          "secret": ""
+        },
+        "output": "DaBQacIHB6FCKocfPme7o5BIrwne87ibBLj7EYGUds0="
+      },
+      {
+        "name": "unicode-secret",
+        "input": {
+          "timestamp": "1700000001",
+          "secret": "密钥🔑"
+        },
+        "output": "8QeGEiQQcApdP8FmMovtTw7bT/FFmF394/Iv4jpPaB8="
+      }
+    ],
+    "detectType": [
+      {
+        "name": "plain",
+        "input": {
+          "text": "你好，今天下午三点开会",
+          "chips": 0
+        },
+        "output": {
+          "t": "text",
+          "why": "纯文字消息，直接以 text 类型发送"
+        }
+      },
+      {
+        "name": "empty",
+        "input": {
+          "text": "",
+          "chips": 0
+        },
+        "output": {
+          "t": "text",
+          "why": "编辑器为空 · 输入内容后会自动判断消息类型"
+        }
+      },
+      {
+        "name": "whitespace-only",
+        "input": {
+          "text": "  \n  ",
+          "chips": 0
+        },
+        "output": {
+          "t": "text",
+          "why": "编辑器为空 · 输入内容后会自动判断消息类型"
+        }
+      },
+      {
+        "name": "bold",
+        "input": {
+          "text": "**加粗** 重点",
+          "chips": 0
+        },
+        "output": {
+          "t": "post",
+          "why": "检测到 <b>Markdown</b>，纯文本无法完整呈现"
+        }
+      },
+      {
+        "name": "heading",
+        "input": {
+          "text": "# 标题\n正文",
+          "chips": 0
+        },
+        "output": {
+          "t": "post",
+          "why": "检测到 <b>Markdown</b>，纯文本无法完整呈现"
+        }
+      },
+      {
+        "name": "link",
+        "input": {
+          "text": "看[链接](https://x.com)啊",
+          "chips": 0
+        },
+        "output": {
+          "t": "post",
+          "why": "检测到 <b>Markdown</b>，纯文本无法完整呈现"
+        }
+      },
+      {
+        "name": "at-all",
+        "input": {
+          "text": "@所有人 注意",
+          "chips": 0
+        },
+        "output": {
+          "t": "post",
+          "why": "检测到 <b>@ 提及</b>，纯文本无法完整呈现"
+        }
+      },
+      {
+        "name": "at-user",
+        "input": {
+          "text": "@张三 请查收",
+          "chips": 0
+        },
+        "output": {
+          "t": "post",
+          "why": "检测到 <b>@ 提及</b>，纯文本无法完整呈现"
+        }
+      },
+      {
+        "name": "list",
+        "input": {
+          "text": "- 甲\n- 乙",
+          "chips": 0
+        },
+        "output": {
+          "t": "post",
+          "why": "检测到 <b>Markdown</b>，纯文本无法完整呈现"
+        }
+      },
+      {
+        "name": "quote",
+        "input": {
+          "text": "> 引用",
+          "chips": 0
+        },
+        "output": {
+          "t": "post",
+          "why": "检测到 <b>Markdown</b>，纯文本无法完整呈现"
+        }
+      },
+      {
+        "name": "card-json",
+        "input": {
+          "text": "{\"config\": {\"wide_screen_mode\": true}}",
+          "chips": 0
+        },
+        "output": {
+          "t": "interactive",
+          "why": "检测到 <b>卡片 JSON</b>，将以交互卡片渲染"
+        }
+      },
+      {
+        "name": "card-fence",
+        "input": {
+          "text": "```card\n{\"header\": {}}\n```",
+          "chips": 0
+        },
+        "output": {
+          "t": "interactive",
+          "why": "检测到 <b>卡片 JSON</b>，将以交互卡片渲染"
+        }
+      },
+      {
+        "name": "chips-only",
+        "input": {
+          "text": "",
+          "chips": 2
+        },
+        "output": {
+          "t": "image",
+          "why": "仅包含 <b>2 张图片</b>，采用图片消息发送"
+        }
+      },
+      {
+        "name": "chips-and-text",
+        "input": {
+          "text": "带说明文字",
+          "chips": 1
+        },
+        "output": {
+          "t": "post",
+          "why": "检测到 <b>1 张图片</b>，纯文本无法完整呈现"
+        }
+      }
+    ],
+    "parseInline": [
+      {
+        "name": "plain",
+        "input": {
+          "text": "季度报告已发布"
+        },
+        "output": [
+          {
+            "tag": "text",
+            "text": "季度报告已发布"
+          }
+        ]
+      },
+      {
+        "name": "link",
+        "input": {
+          "text": "查看报告[点击这里](https://feishu.cn/docx/abc)谢谢"
+        },
+        "output": [
+          {
+            "tag": "text",
+            "text": "查看报告"
+          },
+          {
+            "tag": "a",
+            "text": "点击这里",
+            "href": "https://feishu.cn/docx/abc"
+          },
+          {
+            "tag": "text",
+            "text": "谢谢"
+          }
+        ]
+      },
+      {
+        "name": "img",
+        "input": {
+          "text": "![架构图](img_ecffc3b9)"
+        },
+        "output": [
+          {
+            "tag": "img",
+            "image_key": "img_ecffc3b9"
+          }
+        ]
+      },
+      {
+        "name": "mixed-link-img",
+        "input": {
+          "text": "看[图](https://a.cn/x)和![图2](img_abc)吧"
+        },
+        "output": [
+          {
+            "tag": "text",
+            "text": "看"
+          },
+          {
+            "tag": "a",
+            "text": "图",
+            "href": "https://a.cn/x"
+          },
+          {
+            "tag": "text",
+            "text": "和"
+          },
+          {
+            "tag": "img",
+            "image_key": "img_abc"
+          },
+          {
+            "tag": "text",
+            "text": "吧"
+          }
+        ]
+      },
+      {
+        "name": "bold",
+        "input": {
+          "text": "**加粗**普通"
+        },
+        "output": [
+          {
+            "tag": "text",
+            "text": "加粗"
+          },
+          {
+            "tag": "text",
+            "text": "普通"
+          }
+        ]
+      },
+      {
+        "name": "code",
+        "input": {
+          "text": "前面`code`后面"
+        },
+        "output": [
+          {
+            "tag": "text",
+            "text": "前面"
+          },
+          {
+            "tag": "text",
+            "text": "code"
+          },
+          {
+            "tag": "text",
+            "text": "后面"
+          }
+        ]
+      },
+      {
+        "name": "at-all",
+        "input": {
+          "text": "@所有人 请查收"
+        },
+        "output": [
+          {
+            "tag": "at",
+            "user_id": "all",
+            "user_name": "所有人"
+          },
+          {
+            "tag": "text",
+            "text": " 请查收"
+          }
+        ]
+      },
+      {
+        "name": "at-tag",
+        "input": {
+          "text": "<at user_id=\"ou_123\">张三</at> 你好"
+        },
+        "output": [
+          {
+            "tag": "at",
+            "user_id": "ou_123",
+            "user_name": "张三"
+          },
+          {
+            "tag": "text",
+            "text": " 你好"
+          }
+        ]
+      },
+      {
+        "name": "single-star-italic",
+        "input": {
+          "text": "单*星*不解析"
+        },
+        "output": [
+          {
+            "tag": "text",
+            "text": "单*星*不解析"
+          }
+        ]
+      },
+      {
+        "name": "unclosed-bold",
+        "input": {
+          "text": "**未闭合"
+        },
+        "output": [
+          {
+            "tag": "text",
+            "text": "*"
+          },
+          {
+            "tag": "text",
+            "text": "*未闭合"
+          }
+        ]
+      },
+      {
+        "name": "empty",
+        "input": {
+          "text": ""
+        },
+        "output": []
+      },
+      {
+        "name": "unicode",
+        "input": {
+          "text": "🎉 emoji 与 **粗体** 混排"
+        },
+        "output": [
+          {
+            "tag": "text",
+            "text": "🎉 emoji 与 "
+          },
+          {
+            "tag": "text",
+            "text": "粗体"
+          },
+          {
+            "tag": "text",
+            "text": " 混排"
+          }
+        ]
+      }
+    ],
+    "mdToPost": [
+      {
+        "name": "single-line",
+        "input": {
+          "md": "季度报告已发布",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "季度报告已发布"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "title-and-link",
+        "input": {
+          "md": "# 季度报告\n报告已发布\n[下载](https://x.com/f.pdf)",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "季度报告",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "报告已发布"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "a",
+                      "text": "下载",
+                      "href": "https://x.com/f.pdf"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "code-block",
+        "input": {
+          "md": "正文前\n\n```js\nconsole.log(1);\nconsole.log(2);\n```\n正文后",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "正文前"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "console.log(1);"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "console.log(2);"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "正文后"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "unclosed-code-block",
+        "input": {
+          "md": "正文\n```js\ncode-line",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "正文"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "code-line"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "quote",
+        "input": {
+          "md": "> 引用行\n普通行",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "引用行"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "普通行"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "attachments-append",
+        "input": {
+          "md": "带图正文",
+          "attImageKeys": [
+            "img_a",
+            "img_b"
+          ]
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "带图正文"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "img",
+                      "image_key": "img_a"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "img",
+                      "image_key": "img_b"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "title-override",
+        "input": {
+          "md": "# 标题A\n内容",
+          "attImageKeys": [],
+          "titleOverride": "覆盖标题"
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "覆盖标题",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "# 标题A"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "内容"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "lists",
+        "input": {
+          "md": "- 列表1\n- 列表2\n1. 有序",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "- 列表1"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "- 列表2"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "1. 有序"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "blank-lines",
+        "input": {
+          "md": "段落一\n\n\n\n段落二",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "段落一"
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "段落二"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "empty-md",
+        "input": {
+          "md": "",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": []
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "unicode-long",
+        "input": {
+          "md": "🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 \n长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长",
+          "attImageKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 🎉 "
+                    }
+                  ],
+                  [
+                    {
+                      "tag": "text",
+                      "text": "长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      }
+    ],
+    "extractCardJson": [
+      {
+        "name": "raw-json",
+        "input": {
+          "text": "{\"config\":{\"wide_screen_mode\":true},\"elements\":[{\"tag\":\"div\",\"text\":{\"tag\":\"lark_md\",\"content\":\"正文\"}}]}"
+        },
+        "output": {
+          "config": {
+            "wide_screen_mode": true
+          },
+          "elements": [
+            {
+              "tag": "div",
+              "text": {
+                "tag": "lark_md",
+                "content": "正文"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "card-fence",
+        "input": {
+          "text": "```card\n{\"header\":{\"title\":{\"tag\":\"plain_text\",\"content\":\"标题\"},\"template\":\"blue\"}}\n```"
+        },
+        "output": {
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "标题"
+            },
+            "template": "blue"
+          }
+        }
+      },
+      {
+        "name": "plain-text-autowrap",
+        "input": {
+          "text": "标题行\n正文内容"
+        },
+        "output": {
+          "config": {
+            "wide_screen_mode": true
+          },
+          "elements": [
+            {
+              "tag": "div",
+              "text": {
+                "tag": "lark_md",
+                "content": "正文内容"
+              }
+            }
+          ],
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "标题行"
+            },
+            "template": "blue"
+          }
+        }
+      },
+      {
+        "name": "bad-json-autowrap",
+        "input": {
+          "text": "{\"bad json"
+        },
+        "output": {
+          "config": {
+            "wide_screen_mode": true
+          },
+          "elements": [],
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "{\"bad json"
+            },
+            "template": "blue"
+          }
+        }
+      },
+      {
+        "name": "title-only-autowrap",
+        "input": {
+          "text": "只有标题"
+        },
+        "output": {
+          "config": {
+            "wide_screen_mode": true
+          },
+          "elements": [],
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "只有标题"
+            },
+            "template": "blue"
+          }
+        }
+      },
+      {
+        "name": "empty-text",
+        "input": {
+          "text": "   \n  "
+        },
+        "output": {
+          "config": {
+            "wide_screen_mode": true
+          },
+          "elements": []
+        }
+      }
+    ],
+    "buildPayload": [
+      {
+        "name": "text",
+        "input": {
+          "text": "hello",
+          "type": "text",
+          "imgKeys": []
+        },
+        "output": {
+          "msg_type": "text",
+          "content": {
+            "text": "hello"
+          }
+        }
+      },
+      {
+        "name": "post",
+        "input": {
+          "text": "# T\nbody",
+          "type": "post",
+          "imgKeys": []
+        },
+        "output": {
+          "msg_type": "post",
+          "content": {
+            "post": {
+              "zh_cn": {
+                "title": "T",
+                "content": [
+                  [
+                    {
+                      "tag": "text",
+                      "text": "body"
+                    }
+                  ]
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "image-first-key-only",
+        "input": {
+          "text": "x",
+          "type": "image",
+          "imgKeys": [
+            "img_k1",
+            "img_k2"
+          ]
+        },
+        "output": {
+          "msg_type": "image",
+          "content": {
+            "image_key": "img_k1"
+          }
+        }
+      },
+      {
+        "name": "image-no-keys",
+        "input": {
+          "text": "x",
+          "type": "image",
+          "imgKeys": []
+        },
+        "error": "没有可用的 image_key，请等待图片上传完成"
+      },
+      {
+        "name": "interactive-json",
+        "input": {
+          "text": "{\"config\":{},\"elements\":[{\"tag\":\"div\"}]}",
+          "type": "interactive",
+          "imgKeys": []
+        },
+        "output": {
+          "msg_type": "interactive",
+          "card": {
+            "config": {},
+            "elements": [
+              {
+                "tag": "div"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "interactive-autowrap-with-images",
+        "input": {
+          "text": "卡片标题\n卡片正文",
+          "type": "interactive",
+          "imgKeys": [
+            "img_k1",
+            "img_k2"
+          ]
+        },
+        "output": {
+          "msg_type": "interactive",
+          "card": {
+            "config": {
+              "wide_screen_mode": true
+            },
+            "elements": [
+              {
+                "tag": "div",
+                "text": {
+                  "tag": "lark_md",
+                  "content": "卡片正文"
+                }
+              },
+              {
+                "tag": "img",
+                "img_key": "img_k1",
+                "alt": {
+                  "tag": "plain_text",
+                  "content": "图片"
+                }
+              },
+              {
+                "tag": "img",
+                "img_key": "img_k2",
+                "alt": {
+                  "tag": "plain_text",
+                  "content": "图片"
+                }
+              }
+            ],
+            "header": {
+              "title": {
+                "tag": "plain_text",
+                "content": "卡片标题"
+              },
+              "template": "blue"
+            }
+          }
+        }
+      },
+      {
+        "name": "interactive-json-with-image",
+        "input": {
+          "text": "{\"elements\":[{\"tag\":\"div\"}]}",
+          "type": "interactive",
+          "imgKeys": [
+            "img_k9"
+          ]
+        },
+        "output": {
+          "msg_type": "interactive",
+          "card": {
+            "elements": [
+              {
+                "tag": "div"
+              },
+              {
+                "tag": "img",
+                "img_key": "img_k9",
+                "alt": {
+                  "tag": "plain_text",
+                  "content": "图片"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
