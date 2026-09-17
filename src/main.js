@@ -184,28 +184,28 @@ function countChars(el){ return ((edText(el)||'').replace(/\s/g,'')).length; }
 function activeEd(){ return $('#expand').classList.contains('show') ? expEd : ed; }
 
 const TYPE_LABEL = { text:'文本', post:'富文本', image:'图片', interactive:'交互卡片' };
-function detect(el){
+/* 类型识别走 Rust core（invoke 'analyze'，D15：150ms 防抖 + 递增序号，仅最新序号生效）；
+ * Tauri 不可用时降级到 src/message.js 的本地 detectType（同一基线实现） */
+let analyzeSeq = 0, analyzeTimer = null, lastAnalysis = { t:'text', why:'' };
+function analyzeAsync(){
+  const seq = ++analyzeSeq;
+  const el = activeEd();
   const text = edText(el);
   const chips = $$('.chip', el).length;
-  const hasMd = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|^#{1,3}\s|^[-*]\s|^>\s|^\d+\.\s)/m.test(text);
-  const hasAt = /@所有人|@[^\s@]{1,12}/.test(text);
-  if (/```card|\{\s*"config"|\{\s*"header"/.test(text))
-    return { t:'interactive', why:'检测到 <b>卡片 JSON</b>，将以交互卡片渲染' };
-  if (chips && !text.trim())
-    return { t:'image', why:'仅包含 <b>' + chips + ' 张图片</b>，采用图片消息发送' };
-  if (chips || hasMd || hasAt)
-    return { t:'post', why:'检测到 <b>' + [chips && (chips + ' 张图片'), hasMd && 'Markdown', hasAt && '@ 提及'].filter(Boolean).join('、') + '</b>，纯文本无法完整呈现' };
-  if (!text.trim())
-    return { t:'text', why:'编辑器为空 · 输入内容后会自动判断消息类型' };
-  return { t:'text', why:'纯文字消息，直接以 text 类型发送' };
+  const apply = (d) => {
+    if (seq !== analyzeSeq) return;   // 旧响应不得覆盖新识别
+    lastAnalysis = d;
+    renderTypePill(d);
+  };
+  if(!invoke){ apply(detectType(text, chips)); return; }
+  invoke('analyze', {text, chips}).then(apply).catch(() => apply(detectType(text, chips)));
 }
-function forcedType(){
-  const v = config.last_type || 'auto';
-  return v === 'auto' || TYPE_LABEL[v] ? v : 'auto';
+function detect(el){
+  // 保留同步取值口径（send 校验等用 lastAnalysis），识别更新走 analyzeAsync
+  return lastAnalysis;
 }
-function refresh(){
+function renderTypePill(d){
   const el = activeEd();
-  const d = detect(el);
   const ft = forcedType();
   const finalType = ft === 'auto' ? d.t : ft;
   const pill = $('#typePill');
@@ -213,6 +213,14 @@ function refresh(){
   pill.textContent = TYPE_LABEL[finalType] || '文本';
   $('#whyText').innerHTML = ft === 'auto' ? d.why :
     '已指定为 <b>' + TYPE_LABEL[ft] + '</b>（识别结果：' + TYPE_LABEL[d.t] + '）';
+}
+function forcedType(){
+  const v = config.last_type || 'auto';
+  return v === 'auto' || TYPE_LABEL[v] ? v : 'auto';
+}
+function refresh(){
+  const el = activeEd();
+  renderTypePill(lastAnalysis);
 
   const n = countChars(el);
   $('#counter').textContent = n ? n + ' 字' : '';
@@ -223,6 +231,11 @@ function refresh(){
     b.classList.toggle('ready', ready);
     b.setAttribute('aria-disabled', String(!ready));
   });
+
+  // 输入防抖 150ms 后异步识别（D15）
+  clearTimeout(analyzeTimer);
+  analyzeTimer = setTimeout(analyzeAsync, 150);
+  if (analyzeTimer && !ready) { /* 空编辑器也走防抖，保证 pill 复位 */ }
 }
 function updateBotLabels(){
   const bot = config.webhooks[config.last_webhook];
@@ -318,127 +331,7 @@ function uploadChip(chip){
   });
 });
 
-/* ===================== Markdown → 飞书 post ===================== */
-function parseInline(text){
-  const out = [];
-  let i = 0;
-  while(i < text.length){
-    const rest = text.slice(i);
-    const atM = rest.match(/^<at\s+user_id="([^"]+)"[^>]*>([^<]*)<\/at>/);
-    if(atM){ out.push({tag:'at', user_id:atM[1], user_name:atM[2]||''}); i += atM[0].length; continue; }
-    if(rest.startsWith('@所有人')){ out.push({tag:'at', user_id:'all', user_name:'所有人'}); i += 4; continue; }
-    const imgM = rest.match(/^!\[([^\]]*)\]\(([^)]+)\)/);
-    if(imgM){ out.push({tag:'img', image_key:imgM[2]}); i += imgM[0].length; continue; }
-    const linkM = rest.match(/^\[([^\]]+)\]\(([^)]+)\)/);
-    if(linkM){ out.push({tag:'a', text:linkM[1], href:linkM[2]}); i += linkM[0].length; continue; }
-    const boldM = rest.match(/^\*\*([^*]+)\*\*/);
-    if(boldM){ out.push({tag:'text', text:boldM[1]}); i += boldM[0].length; continue; }
-    const codeM = rest.match(/^`([^`]+)`/);
-    if(codeM){ out.push({tag:'text', text:codeM[1]}); i += codeM[0].length; continue; }
-    const next = rest.search(/(\*\*|\[|<at|@所有人|!\[|`)/);
-    if(next === -1){ out.push({tag:'text', text:rest}); break; }
-    if(next > 0){ out.push({tag:'text', text:rest.slice(0,next)}); i += next; }
-    else { out.push({tag:'text', text:text[i]}); i++; }
-  }
-  return out;
-}
-function mdToPost(md, attImageKeys, titleOverride){
-  const lines = md.split('\n');
-  let title = titleOverride || '';
-  const content = [];
-  let inCodeBlock = false;
-  let codeLines = [];
-  for(const line of lines){
-    if(line.trim().startsWith('```')){
-      if(inCodeBlock){
-        for(const cl of codeLines) content.push([{tag:'text', text: cl || ' '}]);
-        codeLines = []; inCodeBlock = false;
-      } else { inCodeBlock = true; }
-      continue;
-    }
-    if(inCodeBlock){ codeLines.push(line); continue; }
-    if(!title && line.startsWith('# ')){ title = line.slice(2).trim(); continue; }
-    if(line.trim() === '') continue;
-    let processed = line;
-    if(processed.startsWith('> ')) processed = processed.slice(2);
-    else if(processed.startsWith('>')) processed = processed.slice(1);
-    const inline = parseInline(processed);
-    if(inline.length) content.push(inline);
-  }
-  if(inCodeBlock && codeLines.length){
-    for(const cl of codeLines) content.push([{tag:'text', text: cl || ' '}]);
-  }
-  for(const key of attImageKeys) content.push([{tag:'img', image_key:key}]);
-  return {msg_type:'post', content:{post:{zh_cn:{title, content}}}};
-}
-
-/* ===================== 消息组装与发送 ===================== */
-async function hmacSign(secret, timestamp){
-  const key = timestamp + '\n' + secret;
-  const enc = new TextEncoder();
-  const ck = await crypto.subtle.importKey('raw', enc.encode(key), {name:'HMAC', hash:'SHA-256'}, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', ck, enc.encode(''));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
-}
-function extractCardJson(text){
-  let t = text.trim().replace(/^```card\s*/i,'').replace(/```\s*$/,'').trim();
-  try { return JSON.parse(t); }
-  catch(e) {
-    const lines = text.trim().split('\n').filter(l => l.trim() !== '');
-    const card = { config: {wide_screen_mode: true}, elements: [] };
-    if(lines.length){
-      const title = lines[0];
-      const body = lines.slice(1).join('\n');
-      card.header = { title: {tag: 'plain_text', content: title}, template: 'blue' };
-      if(body) card.elements.push({tag: 'div', text: {tag: 'lark_md', content: body}});
-    }
-    return card;
-  }
-}
-function buildPayload(text, type, imgKeys, title){
-  switch(type){
-    case 'text':  return {msg_type:'text', content:{text}};
-    case 'post':  return mdToPost(text, imgKeys, title);
-    case 'image':
-      if(!imgKeys.length) throw new Error('没有可用的 image_key，请等待图片上传完成');
-      return {msg_type:'image', content:{image_key:imgKeys[0]}};
-    case 'interactive': {
-      const card = extractCardJson(text);
-      if(imgKeys.length && Array.isArray(card.elements)){
-        for(const key of imgKeys){
-          card.elements.push({tag: 'img', img_key: key, alt: {tag: 'plain_text', content: '图片'}});
-        }
-      }
-      return {msg_type:'interactive', card};
-    }
-  }
-}
-function makePreview(text, type){
-  if(type === 'image') return '图片消息';
-  if(type === 'interactive') return '交互卡片消息';
-  return (text.split('\n')[0]||'').slice(0,60) || '(空)';
-}
-async function sendWebhook(payload){
-  const bot = config.webhooks[config.last_webhook];
-  if(!bot) throw '未配置机器人';
-  if(bot.secret){
-    const ts = Math.floor(Date.now()/1000).toString();
-    payload = Object.assign({}, payload, {timestamp: ts, sign: await hmacSign(bot.secret, ts)});
-  }
-  if(!invoke) throw 'Tauri 环境不可用';
-  const respText = await invoke('send_webhook', {url: bot.url, payload});
-  const m = respText.match(/^HTTP (\d+):\s*(.*)$/s);
-  const httpStatus = m ? parseInt(m[1]) : 0;
-  const body = m ? m[2] : respText;
-  let ok = httpStatus >= 200 && httpStatus < 300;
-  let msg = 'HTTP ' + httpStatus;
-  try{
-    const j = JSON.parse(body);
-    if(j.code === 0){ ok = true; msg = '200 OK'; }
-    else if(j.code !== undefined){ ok = false; msg = j.code + ' ' + (j.msg||''); }
-  }catch(e){}
-  return {ok, msg};
-}
+/* ===================== 消息组装与发送（组装/签名/历史全在 Rust core，方案 v3 §九 D7） ===================== */
 
 /* 编辑器内容收集 */
 function collectEd(el){
@@ -480,15 +373,11 @@ async function send(){
 
   const {text, chips, imgKeys, pending} = collectEd(el);
   if(pending){ toast('图片仍在上传中，请稍候', '', 'err'); return; }
-  const d = detect(el);
-  const type = forcedType() === 'auto' ? d.t : forcedType();
+  const ft = forcedType();
+  const type = ft === 'auto' ? lastAnalysis.t : ft;
   if(type !== 'image' && !text.trim() && !chips.length){ toast('内容为空', '', 'err'); return; }
 
-  let payload;
-  try{
-    const title = el === expEd ? ($('#expandTitle').value.trim() || '') : '';
-    payload = buildPayload(text, type, imgKeys, title);
-  }catch(e){ toast('消息组装失败', e.message, 'err'); return; }
+  const title = el === expEd ? ($('#expandTitle').value.trim() || '') : '';
 
   // 记录用的图片元数据（与 imgKeys 同序）
   const keyed = chips.filter(c => c._imageKey);
@@ -498,29 +387,34 @@ async function send(){
     img_keys: keyed.map(c => c._imageKey),
     thumbs
   } : {};
+  const extra = {};
+  if (type === 'text' || type === 'post') extra.text = text;
+  if (Object.keys(media).length) extra.media = media;
+  const summary = type === 'image'
+    ? chips.map(c=>c.dataset.name).join(', ') + ' (' + chips.length + ' 张图)'
+    : null;
 
   const t0 = performance.now();
   log('info', 'send: 开始发送 type=' + type + ' 机器人=' + (bot.name || '?'));
   try{
-    const r = await sendWebhook(payload);
+    if(!invoke) throw 'Tauri 环境不可用';
+    // 组装 / 签名 / 发送 / 历史写入全部在 core（D7）；网络失败也会记录 failed/unknown
+    const r = await invoke('send_message', {
+      botKey: null, msgType: ft, text, imageKeys: imgKeys,
+      title: title || null, summary: summary || null,
+      extra: Object.keys(extra).length ? extra : null,
+    });
     const dt = Math.round(performance.now() - t0);
-    log((r.ok ? 'info' : 'error'), 'send: 完成 type=' + type + ' ' + r.msg + ' · ' + dt + 'ms');
-    const rec = {
-      time: nowIso(), kind: type, dir: 'out',
-      summary: makePreview(text, type), ok: r.ok, status: r.msg,
-      payload, ...media
-    };
-    if (type === 'text' || type === 'post') rec.text = text;
-    if (type === 'image') rec.summary = chips.map(c=>c.dataset.name).join(', ') + ' (' + chips.length + ' 张图)';
-    addRecord(rec);
+    log(r.ok ? 'info' : 'error', 'send: 完成 type=' + type + ' ' + r.status_line + ' · ' + dt + 'ms');
+    addRecord(r.record, false);   // 历史已由 core 落盘，这里只做界面渲染
     el.innerHTML = '';
     syncEmpty(el); refresh();
     if(el === expEd) $('#expandTitle').value = '';
-    toast(r.ok ? ('已发送到 ' + bot.name) : '发送失败', r.msg, r.ok ? '' : 'err');
+    toast(r.ok ? ('已发送到 ' + bot.name) : '发送失败', r.status_line, r.ok ? '' : 'err');
   }catch(e){
     const msg = typeof e === 'string' ? e : (e && e.message) || String(e);
     log('error', 'send: 发送失败 ' + msg);
-    addRecord({time: nowIso(), kind: type, dir:'out', summary: makePreview(text, type), ok:false, status:'发送失败', payload, ...media});
+    // Err 仅发生在发送之前（bot 缺失/组装失败等），core 未记录历史
     toast('发送失败', msg, 'err');
   }
 }
@@ -698,10 +592,11 @@ function renderStream(){
   refreshStats();
   scrollToEnd(false);
 }
-function addRecord(rec){
+function addRecord(rec, persist = true){
   config.history.push(rec);
   if(config.history.length > 100) config.history.shift();
-  saveConfig();
+  // persist=false：记录已由 Rust core 落盘（消息发送，D7），此处只渲染
+  if (persist) saveConfig();
   // 增量插入
   const stream = $('#stream');
   const lastRec = config.history[config.history.length - 2];
@@ -752,10 +647,13 @@ $('#stream').addEventListener('click', async e => {
     } else if (act === 'resend'){
       if (rec.payload){
         try{
-          const r = await sendWebhook(JSON.parse(JSON.stringify(rec.payload)));
-          rec.ok = r.ok; rec.status = r.msg; saveConfig(); renderStream();
-          toast(r.ok ? '已重新发送' : '重新发送失败', r.msg, r.ok ? '' : 'err');
-        }catch(e2){ toast('重新发送失败', String(e2), 'err'); }
+          if(!invoke) throw 'Tauri 环境不可用';
+          // 重发走 core：重签名 + 按 time 更新原历史条目（不追加）
+          const r = await invoke('resend_payload', {payload: rec.payload, botKey: null, recTime: rec.time});
+          rec.ok = r.ok; rec.status = r.status_line; rec.state = r.state;
+          saveConfig(); renderStream();
+          toast(r.ok ? '已重新发送' : '重新发送失败', r.status_line, r.ok ? '' : 'err');
+        }catch(e2){ toast('重新发送失败', String(e2 && e2.message || e2), 'err'); }
       }
     }
     return;
@@ -1284,7 +1182,62 @@ $$('#configOverlay .nav button').forEach(b => {
     b.classList.add('active');
     const target = tabToPane[b.dataset.tab];
     $$('#configOverlay .pane').forEach(p => p.classList.toggle('active', p.id === target));
+    if (target === 'paneAgent') refreshAgentStatus();
   });
+});
+
+/* ===================== Agent tab（CLI / 技能安装，模仿 paseo，方案 v3 §七） ===================== */
+function agentBadge(el, text, kind){
+  el.textContent = text;
+  el.style.background = kind === 'ok' ? 'rgba(52,199,89,.15)' : kind === 'warn' ? 'rgba(255,159,10,.18)' : 'var(--track)';
+  el.style.color = kind === 'ok' ? '#34c759' : kind === 'warn' ? '#ff9f0a' : 'var(--muted)';
+}
+async function refreshAgentStatus(){
+  const cliBadge = $('#cliStatusBadge'), cliBtn = $('#cliInstallBtn'), cliHint = $('#cliHint');
+  const skBadge = $('#skillStatusBadge'), skBtn = $('#skillInstallBtn'), skUn = $('#skillUninstallBtn'), skHint = $('#skillHint');
+  if(!invoke){ [cliBtn, skBtn, skUn].forEach(b => { if (b) b.disabled = true; }); return; }
+  try{
+    const [cli, sk] = await Promise.all([invoke('cli_install_status'), invoke('skills_status')]);
+    if (cli.installed){ agentBadge(cliBadge, '已安装', 'ok'); cliBtn.textContent = '重新安装'; }
+    else { agentBadge(cliBadge, cli.source_available ? '未安装' : '未打包', 'idle'); cliBtn.textContent = '安装'; }
+    cliBtn.disabled = !cli.source_available;
+    cliHint.textContent = cli.target_path
+      ? ('安装位置: ' + cli.target_path + (cli.installed ? '' : ' · 安装后需重开终端使 PATH 生效'))
+      : '';
+    if (sk.state === 'up-to-date') agentBadge(skBadge, '已安装 · 最新', 'ok');
+    else if (sk.state === 'drift') agentBadge(skBadge, '有更新', 'warn');
+    else agentBadge(skBadge, '未安装', 'idle');
+    skBtn.textContent = sk.state === 'up-to-date' ? '重新同步' : sk.state === 'drift' ? '更新' : '安装技能';
+    skUn.disabled = sk.state === 'not-installed';
+    skHint.textContent = '安装到 ' + sk.targets.map(t => '~/' + t.label + '/skills').join('、');
+  }catch(e){ /* 状态读取失败静默，按钮保持当前态 */ }
+}
+$('#cliInstallBtn')?.addEventListener('click', async () => {
+  const b = $('#cliInstallBtn');
+  b.disabled = true;
+  try{
+    await invoke('install_cli');
+    toast('CLI 已安装', '重开终端后即可使用 qingniao 命令');
+  }catch(e){ toast('CLI 安装失败', String(e && e.message || e), 'err'); }
+  refreshAgentStatus();
+});
+$('#skillInstallBtn')?.addEventListener('click', async () => {
+  const b = $('#skillInstallBtn');
+  b.disabled = true;
+  try{
+    await invoke('install_skills');
+    toast('技能已同步', 'Claude / Codex 等 Agent 即可发现青鸟技能');
+  }catch(e){ toast('技能同步失败', String(e && e.message || e), 'err'); }
+  refreshAgentStatus();
+});
+$('#skillUninstallBtn')?.addEventListener('click', async () => {
+  const b = $('#skillUninstallBtn');
+  b.disabled = true;
+  try{
+    await invoke('uninstall_skills');
+    toast('技能已卸载', '只移除了青鸟托管的文件');
+  }catch(e){ toast('卸载失败', String(e && e.message || e), 'err'); }
+  refreshAgentStatus();
 });
 
 $('#toggleSecret')?.addEventListener('click', () => {

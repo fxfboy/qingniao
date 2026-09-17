@@ -16,6 +16,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# 共享核心：消息组装/识别/签名/发送/配置持久层（CLI 与 APP 共用，方案 v3 D1/D2）
+qingniao-core = { path = "../crates/qingniao-core" }
 # tray-icon：托盘/菜单栏能力的唯一启用方式。
 # 注意：不要在 tauri.conf.json 配置 app.trayIcon——Tauri 会在 initialize_plugins()
 # 之前依据该配置自动创建 tray，绕过 single-instance 的主实例判定（见设计文档 §8.1、§13.1 事实 15）。

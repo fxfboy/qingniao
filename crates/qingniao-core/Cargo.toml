@@ -1,0 +1,17 @@
+[package]
+name = "qingniao-core"
+version = "0.5.0"
+edition = "2021"
+description = "青鸟共享核心：消息类型识别 / Markdown→post / 卡片解析 / payload 组装 / webhook 签名（APP 与 CLI 共用，零 tauri 依赖）"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# JS 正则语义移植（parse_inline / detect_type 的前缀锚定模式，RE2 语义等价）
+regex = "1"
+# webhook HMAC-SHA256 签名（key = timestamp + "\n" + secret，与飞书官方实现一致）
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+# webhook 发送 / 图片上传（blocking，与 APP 同依赖不重复编译）
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "multipart"] }

@@ -214,22 +214,36 @@ fn extract_apply_url(msg: &str, app_id: &str, scope: &str) -> String {
 /// 一个已保存的 webhook 机器人
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct WebhookItem {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub url: String,
+    #[serde(default)]
     pub secret: String,
+    /// schema v2 起的稳定 id（CLI 写入）；flatten 透传保留，APP 保存不丢失
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// 一条发送历史
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct HistoryItem {
+    #[serde(default)]
     pub time: String,
+    // v2 前端记录使用 kind 字段（进 extra）；msg_type 为旧字段，缺失时容忍
+    #[serde(default)]
     pub msg_type: String,
+    #[serde(default)]
     pub summary: String,
+    #[serde(default)]
     pub payload: serde_json::Value,
     #[serde(default)]
     pub ok: bool,
     #[serde(default)]
     pub status: String,
+    /// v2 前端的 kind/dir/state/media/text 等展示字段原样透传，保存不丢失
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// 文件传输相关配置（设计文档 §10.2 / D5）
@@ -246,9 +260,13 @@ pub struct TransferConfig {
 /// 应用配置
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppConfig {
+    #[serde(default)]
     pub webhooks: Vec<WebhookItem>,
+    #[serde(default)]
     pub history: Vec<HistoryItem>,
+    #[serde(default)]
     pub last_webhook: Option<usize>,
+    #[serde(default)]
     pub last_type: Option<String>,
     #[serde(default)]
     pub app_id: String,
@@ -264,6 +282,9 @@ pub struct AppConfig {
     pub hotkey: Option<String>,
     #[serde(default)]
     pub prefs: Option<serde_json::Value>,
+    /// last_bot_id（CLI 写入）等未知字段透传，保存不丢失（方案 v3 D5）
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// 旧版配置目录（identifier 曾为 com.qingniao.app）——仅用于一次性迁移
@@ -668,6 +689,298 @@ fn send_webhook(app: tauri::AppHandle, url: String, payload: serde_json::Value) 
     let body = resp.text().map_err(|e| format!("读取响应失败: {e}"))?;
     write_log(&app, LV_INFO, &format!("send_webhook: 完成 HTTP {} body={}", status.as_u16(), body));
     Ok(format!("HTTP {}: {}", status.as_u16(), body))
+}
+
+// ===== Agent-CLI M3：消息组装/识别/发送走 qingniao-core（方案 v3 §九）=====
+use qingniao_core::config as core_config;
+
+/// 类型识别（前端 analyze；序号 + 150ms 防抖由前端负责，D15）
+pub fn analyze_impl(text: &str, chips: usize) -> serde_json::Value {
+    let d = qingniao_core::message::detect_type(text, chips);
+    serde_json::json!({ "t": d.t.as_str(), "why": d.why })
+}
+
+#[tauri::command]
+fn analyze(text: String, chips: usize) -> serde_json::Value {
+    analyze_impl(&text, chips)
+}
+
+#[derive(Serialize)]
+pub struct SendMessageOutcome {
+    pub ok: bool,
+    pub status_line: String,
+    pub state: String,
+    pub http_status: Option<u16>,
+    pub feishu_code: Option<i64>,
+    pub feishu_msg: Option<String>,
+    pub body_summary: Option<String>,
+    pub error: Option<String>,
+    pub record: serde_json::Value,
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// 发送 + 历史写入（D7：APP 消息历史的唯一写入口）。
+/// APP 维持任意 http(s) 兼容（D10），allow_insecure = true。
+/// 网络/超时失败也写入历史（state=failed/unknown）；Err 仅用于发送前的 usage/config 失败。
+pub fn send_message_impl(
+    cfg_path: &Path,
+    bot_key: Option<String>,
+    msg_type: String,
+    text: String,
+    image_keys: Vec<String>,
+    title: Option<String>,
+    summary: Option<String>,
+    extra: Option<serde_json::Value>,
+    now_secs: u64,
+) -> Result<SendMessageOutcome, String> {
+    use qingniao_core::message::{build_payload, detect_type, MsgType};
+    use qingniao_core::send::{dispatch_send, record_send};
+
+    let loaded = core_config::load(cfg_path)?;
+    for w in &loaded.warnings {
+        log::warn!("send_message: {w}");
+    }
+
+    let mt = if msg_type == "auto" {
+        detect_type(&text, image_keys.len()).t
+    } else {
+        MsgType::from_wire(&msg_type).ok_or_else(|| format!("未知消息类型: {msg_type}"))?
+    };
+    let key_refs: Vec<&str> = image_keys.iter().map(String::as_str).collect();
+    let payload = build_payload(&text, mt, &key_refs, title.as_deref())?;
+
+    let recorded =
+        dispatch_send(&loaded.config, bot_key.as_deref(), &payload, true, now_secs)
+        .map_err(|f| f.message)?;
+
+    let mut rec = recorded.record.clone();
+    if let Some(s) = summary {
+        rec["summary"] = serde_json::Value::String(s);
+    }
+    if let Some(serde_json::Value::Object(map)) = extra {
+        for (k, v) in map {
+            rec[k] = v;
+        }
+    }
+    if let Err(e) = record_send(cfg_path, rec.clone()) {
+        log::warn!("send_message: 历史写入失败（发送已完成）: {e}");
+    }
+
+    Ok(match &recorded.result {
+        Ok(r) => SendMessageOutcome {
+            ok: r.ok,
+            status_line: recorded.status_line,
+            state: recorded.state.into(),
+            http_status: r.http_status,
+            feishu_code: r.feishu_code,
+            feishu_msg: r.feishu_msg.clone(),
+            body_summary: r.body_summary.clone(),
+            error: None,
+            record: rec,
+        },
+        Err(f) => SendMessageOutcome {
+            ok: false,
+            status_line: f.message.clone(),
+            state: recorded.state.into(),
+            http_status: None,
+            feishu_code: None,
+            feishu_msg: None,
+            body_summary: None,
+            error: Some(f.message.clone()),
+            record: rec,
+        },
+    })
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn send_message(
+    app: tauri::AppHandle,
+    bot_key: Option<String>,
+    msg_type: String,
+    text: String,
+    image_keys: Vec<String>,
+    title: Option<String>,
+    summary: Option<String>,
+    extra: Option<serde_json::Value>,
+) -> Result<SendMessageOutcome, String> {
+    let cfg_path = config_path(&app)?;
+    send_message_impl(&cfg_path, bot_key, msg_type, text, image_keys, title, summary, extra, now_secs())
+}
+
+/// 重新发送已存 payload（历史「重发」按钮）：按 time 更新原记录，不追加新条目（与现前端行为一致）
+pub fn resend_payload_impl(
+    cfg_path: &Path,
+    payload: serde_json::Value,
+    bot_key: Option<String>,
+    rec_time: String,
+    now_secs: u64,
+) -> Result<SendMessageOutcome, String> {
+    use qingniao_core::send::{send_prebuilt, SendErrorKind};
+
+    let loaded = core_config::load(cfg_path)?;
+    let attempt = send_prebuilt(&loaded.config, bot_key.as_deref(), &payload, true, now_secs)
+        .map_err(|f| f.message)?;
+    let (ok, state, status_line) = match &attempt.result {
+        Ok(r) => (
+            r.ok,
+            if r.ok { "sent" } else { "failed" },
+            qingniao_core::send::status_line_of(r),
+        ),
+        Err(f) => (
+            false,
+            if f.kind == SendErrorKind::Timeout { "unknown" } else { "failed" },
+            f.message.clone(),
+        ),
+    };
+    core_config::modify(cfg_path, |cfg| {
+        if let Some(arr) = cfg.raw.get_mut("history").and_then(|v| v.as_array_mut()) {
+            for rec in arr.iter_mut() {
+                if rec.get("time").and_then(|v| v.as_str()) == Some(rec_time.as_str()) {
+                    rec["ok"] = serde_json::json!(ok);
+                    rec["status"] = serde_json::json!(status_line);
+                    rec["state"] = serde_json::json!(state);
+                    break;
+                }
+            }
+        }
+        Ok(())
+    })?;
+    let (http_status, feishu_code, feishu_msg, body_summary) = match &attempt.result {
+        Ok(r) => (r.http_status, r.feishu_code, r.feishu_msg.clone(), r.body_summary.clone()),
+        Err(_) => (None, None, None, None),
+    };
+    Ok(SendMessageOutcome {
+        ok,
+        status_line,
+        state: state.into(),
+        http_status,
+        feishu_code,
+        feishu_msg,
+        body_summary,
+        error: None,
+        record: serde_json::Value::Null,
+    })
+}
+
+#[tauri::command]
+fn resend_payload(
+    app: tauri::AppHandle,
+    payload: serde_json::Value,
+    bot_key: Option<String>,
+    rec_time: String,
+) -> Result<SendMessageOutcome, String> {
+    let cfg_path = config_path(&app)?;
+    resend_payload_impl(&cfg_path, payload, bot_key, rec_time, now_secs())
+}
+
+// ===== Agent-CLI M4：技能 / CLI 安装（完全模仿 paseo，方案 v3 §七 D13）=====
+
+/// bundle 技能源目录：打包环境取 resource_dir()/skills；开发环境回退仓库 skills/
+fn bundled_skills_dir(app: &tauri::AppHandle) -> PathBuf {
+    if let Ok(rd) = app.path().resource_dir() {
+        let p = rd.join("skills");
+        if p.join(qingniao_core::skills::SKILL_NAME).is_dir() {
+            return p;
+        }
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("skills")
+}
+
+fn skill_targets() -> Vec<qingniao_core::skills::SkillTarget> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("/"));
+    qingniao_core::skills::default_targets(&home)
+}
+
+#[tauri::command]
+fn skills_status(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
+    qingniao_core::skills::get_status(&bundled_skills_dir(&app), &skill_targets())
+}
+
+#[tauri::command]
+fn install_skills(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
+    let dir = bundled_skills_dir(&app);
+    let targets = skill_targets();
+    qingniao_core::skills::install(&dir, &targets)?;
+    qingniao_core::skills::get_status(&dir, &targets)
+}
+
+#[tauri::command]
+fn uninstall_skills(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
+    let targets = skill_targets();
+    qingniao_core::skills::uninstall(&targets)?;
+    qingniao_core::skills::get_status(&bundled_skills_dir(&app), &targets)
+}
+
+/// CLI 二进制来源：打包环境 resources/bin；开发环境 current_exe 同目录（workspace target）
+fn cli_source_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let exe_name = if cfg!(target_os = "windows") { "qingniao-cli.exe" } else { "qingniao-cli" };
+    if let Ok(rd) = app.path().resource_dir() {
+        let p = rd.join("bin").join(exe_name);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let exe = std::env::current_exe().ok()?;
+    let p = exe.parent()?.join(exe_name);
+    p.exists().then_some(p)
+}
+
+fn cli_install_target() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(|d| PathBuf::from(d).join("qingniao").join("bin").join("qingniao.exe"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("bin").join("qingniao"))
+    }
+}
+
+#[tauri::command]
+fn cli_install_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let target = cli_install_target();
+    let source_available = cli_source_path(&app).is_some();
+    let installed = target.as_ref().map(|p| p.exists()).unwrap_or(false);
+    Ok(serde_json::json!({
+        "installed": installed,
+        "source_available": source_available,
+        "target_path": target.map(|p| p.display().to_string()),
+    }))
+}
+
+#[tauri::command]
+fn install_cli(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let source = cli_source_path(&app).ok_or(
+        "未找到 CLI 二进制（开发模式请先 cargo build -p qingniao-cli；打包环境由 CI 嵌入 resources）",
+    )?;
+    let target = cli_install_target().ok_or("无法定位安装目录（HOME/LOCALAPPDATA）")?;
+    qingniao_core::skills::install_cli_binary(&source, &target)?;
+    // unix：幂等往 shell rc 追加 PATH（仅 bash/zsh）
+    let mut shell_updated = false;
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            let shell = std::env::var("SHELL").unwrap_or_default();
+            let bin_dir = target
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| home.join(".local").join("bin"));
+            shell_updated = qingniao_core::skills::ensure_path_in_shell_rc(&home, &shell, &bin_dir)?;
+        }
+    }
+    log::info!("install_cli: target={} shell_updated={}", target.display(), shell_updated);
+    cli_install_status(app)
 }
 
 /// 上传图片到飞书，返回 image_key
@@ -1207,6 +1520,14 @@ pub fn run() {
             test_connection,
             log_event,
             read_file_base64,
+            analyze,
+            send_message,
+            resend_payload,
+            skills_status,
+            install_skills,
+            uninstall_skills,
+            cli_install_status,
+            install_cli,
             key_status,
             key_generate,
             key_export,
@@ -1228,6 +1549,23 @@ pub fn run() {
             // 先装 logger，之后的 tray / 生命周期日志才有处可去
             install_file_logger(app.handle());
             log::info!("青鸟启动：单实例判定通过，开始初始化常驻功能");
+
+            // ===== Agent 技能 drift 自动更新（方案 v3 §七 D13）=====
+            {
+                let app_handle = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("qn-skills-autoupdate".into())
+                    .spawn(move || {
+                        let dir = bundled_skills_dir(&app_handle);
+                        let targets = skill_targets();
+                        match qingniao_core::skills::auto_update(&dir, &targets) {
+                            Ok(true) => log::info!("Agent 技能检测到漂移，已自动更新"),
+                            Ok(false) => {}
+                            Err(e) => log::warn!("Agent 技能自动更新失败: {e}"),
+                        }
+                    })
+                    .ok();
+            }
 
             // ===== 传输功能装配（dock-tray 阶段 B）=====
             // 1. 引擎：<app_config_dir>/transfer（quota.json / consumed.json 等持久化在此）

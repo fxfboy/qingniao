@@ -1,0 +1,15 @@
+[package]
+name = "qingniao-cli"
+version = "0.5.0"
+edition = "2021"
+description = "青鸟 CLI：向飞书自定义机器人发送文本/富文本/图片/卡片消息（与 APP 共用 qingniao-core）"
+
+[[bin]]
+name = "qingniao-cli"
+path = "src/main.rs"
+
+[dependencies]
+qingniao-core = { path = "../qingniao-core" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
