@@ -24,6 +24,9 @@ docs
 *.sln
 *.sw?
 
+.claude
+.codebuddy
+
 # 备份文件
 *.bak
 
