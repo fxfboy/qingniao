@@ -29,3 +29,7 @@ docs
 
 # Tauri 生成文件
 src-tauri/gen/
+
+# Rust workspace 构建产物（target 已随 workspace 根移至仓库根）
+/target
+src-tauri/target
