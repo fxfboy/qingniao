@@ -117,7 +117,7 @@ impl StatusDisplay for TrayHandles {
 /// 且**不得**在 `tauri.conf.json` 配置 `app.trayIcon`，否则 Tauri 会在
 /// `initialize_plugins()` 之前自动创建第二个 tray（§13.1 事实 15）。
 pub fn build_tray(app: &AppHandle) -> tauri::Result<TrayHandles> {
-    let status = app.state::<AppState>().service.service.snapshot();
+    let status = app.state::<AppState>().service.read().unwrap().status.snapshot();
 
     // 状态项：disabled 只读，承担可观察性（§5.1）
     let status_item = MenuItemBuilder::with_id(ID_SERVICE_STATUS, status.menu_label())

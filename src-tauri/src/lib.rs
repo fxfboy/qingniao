@@ -8,11 +8,17 @@ use tauri::Manager;
 pub mod lifecycle;
 pub mod service;
 pub mod tray;
+/// 跨网文件传输（docs/文件传输功能设计文档.md v1.1）
+pub mod transfer;
+/// 本地 HTTP 服务（127.0.0.1 双路由，D14/D20）
+pub mod local_server;
+/// OS 凭据库封装（K / 密钥，D15/D21）
+pub mod keyring_store;
 
 use lifecycle::{ExitCoordinator, ExitState, FinalCleanup, QuitSource, QuitStep};
 use service::{
-    LocalServiceController, LocalServiceStatus, PhaseAService, ServiceStatusProvider,
-    TransferSnapshot,
+    LocalServiceStatus, PhaseAService, ServiceStatusProvider, TransferActivityProvider,
+    TransferController, TransferSnapshot, DEFAULT_LOCAL_PORT,
 };
 
 /// 日志级别
@@ -172,19 +178,26 @@ fn mask_webhook(url: &str) -> String {
     }
 }
 
+/// 单项权限探测结果（key ∈ "upload" | "drive"）
+#[derive(Serialize)]
+struct PermResult {
+    key: String,
+    ok: bool,
+    apply_url: Option<String>,
+}
+
 /// 连接测试结果
 #[derive(Serialize)]
 struct ConnTestResult {
     app_name: String,
-    has_upload_permission: bool,
-    apply_url: Option<String>,
+    permissions: Vec<PermResult>,
 }
 
 /// 1x1 透明 PNG，用于探测 im:resource:upload 权限（极小，不产生实际影响）
 const PROBE_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-/// 从飞书权限不足的错误消息中提取申请链接，提取不到则按格式构造
-fn extract_apply_url(msg: &str, app_id: &str) -> String {
+/// 从飞书权限不足的错误消息中提取申请链接，提取不到则按格式构造（scope 为对应权限名，如 im:resource:upload）
+fn extract_apply_url(msg: &str, app_id: &str, scope: &str) -> String {
     if let Some(start) = msg.find("https://open.feishu.cn/app/") {
         let rest = &msg[start..];
         let end = rest
@@ -193,7 +206,7 @@ fn extract_apply_url(msg: &str, app_id: &str) -> String {
         return rest[..end].to_string();
     }
     format!(
-        "https://open.feishu.cn/app/{}/auth?q=im:resource:upload&op_from=openapi&token_type=tenant",
+        "https://open.feishu.cn/app/{}/auth?q={scope}&op_from=openapi&token_type=tenant",
         app_id
     )
 }
@@ -219,6 +232,17 @@ pub struct HistoryItem {
     pub status: String,
 }
 
+/// 文件传输相关配置（设计文档 §10.2 / D5）
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct TransferConfig {
+    /// 配置端口（默认 9876）；实际绑定端口见服务状态
+    #[serde(default)]
+    pub configured_port: Option<u16>,
+    /// 下载目录（None = 系统下载目录）
+    #[serde(default)]
+    pub download_dir: Option<String>,
+}
+
 /// 应用配置
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppConfig {
@@ -230,6 +254,16 @@ pub struct AppConfig {
     pub app_id: String,
     #[serde(default)]
     pub app_secret: String,
+    /// 配置 schema 版本（现文件无版本=1）
+    #[serde(default)]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub transfer: TransferConfig,
+    /// 偏好（主题等，宽松结构）
+    #[serde(default)]
+    pub hotkey: Option<String>,
+    #[serde(default)]
+    pub prefs: Option<serde_json::Value>,
 }
 
 /// 旧版配置目录（identifier 曾为 com.qingniao.app）——仅用于一次性迁移
@@ -308,6 +342,304 @@ fn save_config(app: tauri::AppHandle, config: AppConfig) -> Result<(), String> {
     })?;
     write_log(&app, LV_INFO, &format!("save_config: 已保存 {} 个机器人 / {} 条历史", config.webhooks.len(), config.history.len()));
     Ok(())
+}
+
+/// 读取本地图片文件并返回 base64（拖拽图片 → 输入框 chip 用）
+/// 仅允许常见图片扩展名，读取上限 10 MB
+#[tauri::command]
+fn read_file_base64(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    const MAX: u64 = 10 * 1024 * 1024;
+    let p = std::path::Path::new(&path);
+    let ext_ok = p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg"))
+        .unwrap_or(false);
+    if !ext_ok {
+        return Err("仅支持读取图片文件".into());
+    }
+    let meta = std::fs::metadata(p).map_err(|e| format!("无法读取文件信息: {e}"))?;
+    if meta.len() > MAX {
+        return Err("图片超过 10 MB，请压缩后再试".into());
+    }
+    let bytes = std::fs::read(p).map_err(|e| format!("读取图片失败: {e}"))?;
+    write_log(&app, LV_DEBUG, &format!("read_file_base64: {} ({} B)", p.display(), bytes.len()));
+    use base64::Engine as _;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/* ===================== 传输密钥（keyring，D15/D19/D21） ===================== */
+
+#[derive(Serialize)]
+struct KeyStatus {
+    has_key: bool,
+    kid: String,
+    fingerprint: String,
+    has_previous: bool,
+}
+
+/// 当前密钥状态（指纹/kid = SHA-256(K) 前 8 字节 hex，D19）
+#[tauri::command]
+fn key_status() -> Result<KeyStatus, String> {
+    let cur = keyring_store::get_current()?;
+    let prev = keyring_store::get_previous()?;
+    match cur {
+        Some(hex_key) => {
+            let key = transfer::crypto::key_from_hex(&hex_key)?;
+            Ok(KeyStatus {
+                kid: transfer::crypto::fingerprint(&key),
+                fingerprint: transfer::crypto::fingerprint(&key),
+                has_key: true,
+                has_previous: prev.is_some(),
+            })
+        }
+        None => Ok(KeyStatus {
+            has_key: false,
+            kid: String::new(),
+            fingerprint: String::new(),
+            has_previous: false,
+        }),
+    }
+}
+
+/// 生成本机主密钥并存入凭据库（覆盖旧密钥；配对页「生成」入口）
+#[tauri::command]
+fn key_generate(app: tauri::AppHandle) -> Result<KeyStatus, String> {
+    let hex_key = keyring_store::generate();
+    keyring_store::set_current(&hex_key)?;
+    write_log(&app, LV_INFO, "key_generate: 已生成新主密钥并存入凭据库");
+    key_status()
+}
+
+/// 导出主密钥明文（hex 64 字符）——仅用于两台机器配对，严禁经飞书传输（§12.3）
+#[tauri::command]
+fn key_export() -> Result<String, String> {
+    keyring_store::get_current()?.ok_or_else(|| "尚未配置主密钥".to_string())
+}
+
+/// 导入主密钥（hex 64 字符，覆盖本机；导入前前端已展示指纹供人工核对）
+#[tauri::command]
+fn key_import(hex: String) -> Result<KeyStatus, String> {
+    let key = transfer::crypto::key_from_hex(&hex)?;
+    keyring_store::import(&transfer::crypto::hex(&key))?;
+    key_status()
+}
+
+/// 轮换：生成新密钥，旧密钥降级为 previous 保留 30 天（§12.3）
+#[tauri::command]
+fn key_rotate() -> Result<KeyStatus, String> {
+    if keyring_store::get_current()?.is_none() {
+        return Err("尚未配置主密钥，无需轮换".into());
+    }
+    let hex_key = keyring_store::generate();
+    keyring_store::rotate(&hex_key)?;
+    key_status()
+}
+
+/// 引擎的传输活动适配器：实现 TransferActivityProvider / TransferController，
+/// 让退出协议（checkpoint / cancel_all / join_to_safe_point）作用于真实传输任务。
+struct EngineTransferAdapter(std::sync::Arc<transfer::engine::Engine>);
+
+impl TransferActivityProvider for EngineTransferAdapter {
+    fn snapshot(&self) -> TransferSnapshot {
+        let cleanup_pending = std::fs::read_to_string(self.0.work_dir().join("pending_deletes.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+            .map(|v| v.len() as u32)
+            .unwrap_or(0);
+        TransferSnapshot {
+            accepting: true,
+            cancellable_count: self.0.cancellable_count() as u32,
+            committing_count: 0, // commit（rename/删云端）为不可中断临界区，不出现跨取消窗口
+            cleanup_pending_count: cleanup_pending,
+            checkpointed: true, // 断点信息按片实时持久化，无需显式 checkpoint
+        }
+    }
+}
+
+impl TransferController for EngineTransferAdapter {
+    fn checkpoint(&self) {
+        // 断点信息（.part + 侧车 JSON）按片实时落盘，无需额外动作
+    }
+    fn cancel_all(&self) {
+        self.0.cancel_all();
+    }
+    fn join_to_safe_point(&self, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while self.0.cancellable_count() > 0 {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        true
+    }
+}
+
+/// 读取应用配置（失败返回默认值）
+fn read_app_config(app: &tauri::AppHandle) -> AppConfig {
+    config_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/* ===================== 文件传输命令（P2 上传 / P3 下载与服务） ===================== */
+
+/// 服务实际绑定端口（仅 Running 时有值）；消息链接只用它生成（P0-3）
+pub fn service_bound_port(app: &tauri::AppHandle) -> Option<u16> {
+    let state = app.state::<AppState>();
+    let snap = state.service.read().unwrap().status.snapshot();
+    match snap {
+        LocalServiceStatus::Running { bound_port } => Some(bound_port),
+        _ => None,
+    }
+}
+
+/// 全局 Quota 计数器（引擎内部使用）
+pub fn engine_quota_of(app: &tauri::AppHandle) -> Result<std::sync::Arc<transfer::quota::Quota>, String> {
+    let state = app.state::<AppState>();
+    state
+        .engine
+        .get()
+        .map(|e| e.quota.clone())
+        .ok_or_else(|| "传输引擎未初始化".to_string())
+}
+
+/// 上传任务发起（§8）：校验后立即返回 task_id，后台线程执行；进度走 transfer://progress
+#[tauri::command]
+fn transfer_start_upload(
+    app: tauri::AppHandle,
+    path: String,
+    webhook_url: String,
+    webhook_secret: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let state = app.state::<AppState>();
+    let engine = state.engine.get().ok_or("传输引擎未初始化")?;
+    let cfg = read_app_config(&app);
+    let accepted = engine.start_upload(
+        transfer::engine::UploadRequest {
+            path,
+            webhook_url,
+            webhook_secret: webhook_secret.unwrap_or_default(),
+        },
+        cfg.app_id,
+        cfg.app_secret,
+    )?;
+    write_log(&app, LV_INFO, &format!("transfer_start_upload: task_id={} size={}", accepted.task_id, accepted.size));
+    Ok(serde_json::json!({
+        "task_id": accepted.task_id,
+        "name": accepted.name,
+        "size": accepted.size,
+    }))
+}
+
+/// 取消传输任务（片边界生效）
+#[tauri::command]
+fn transfer_cancel(app: tauri::AppHandle, task_id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let engine = state.engine.get().ok_or("传输引擎未初始化")?;
+    engine.cancel(&task_id)
+}
+
+/// 解析取回链接/裸 payload（§9.2 兜底入口；创建会话，不产生任何下载副作用）
+#[tauri::command]
+fn transfer_parse_payload(app: tauri::AppHandle, input: String) -> Result<serde_json::Value, String> {
+    let state = app.state::<AppState>();
+    let engine = state.engine.get().ok_or("传输引擎未初始化")?;
+    let ev = engine.evaluate_payload(&input)?;
+    let sess = engine.create_session(&input, ev)?;
+    Ok(serde_json::json!({
+        "session_id": sess.handle,
+        "name": sess.name,
+        "size": sess.size,
+    }))
+}
+
+/// 确认下载（与 /dl/confirm 同一引擎入口）：后台线程执行，进度走 transfer://progress
+#[tauri::command]
+fn transfer_confirm_download(app: tauri::AppHandle, session_id: String) -> Result<serde_json::Value, String> {
+    let state = app.state::<AppState>();
+    let engine = state.engine.get().cloned().ok_or("传输引擎未初始化")?;
+    let handle = session_id;
+    // 会话信息要回传 task_id：先在当前线程 claim（单消费），再放线程执行
+    let claim = engine.claim_session(&handle);
+    match claim {
+        Ok(transfer::engine::ClaimResult::AlreadyDone { path }) => {
+            // 幂等：直接返回完成结果
+            Ok(serde_json::json!({
+                "task_id": handle,
+                "already_done": true,
+                "final_path": path,
+            }))
+        }
+        Ok(transfer::engine::ClaimResult::Start(pending)) => {
+            let task_id = pending.task_id.clone().ok_or("内部错误：任务标识缺失")?;
+            let engine2 = engine.clone();
+            let app2 = app.clone();
+            let task_id2 = task_id.clone();
+            std::thread::Builder::new()
+                .name(format!("qn-download-{task_id}"))
+                .spawn(move || {
+                    if let Err(msg) = engine2.run_download_sync(&pending) {
+                        log::warn!("下载任务 {task_id2} 失败: {msg}");
+                    }
+                    let _ = &app2;
+                })
+                .map_err(|e| format!("启动下载线程失败: {e}"))?;
+            Ok(serde_json::json!({ "task_id": task_id }))
+        }
+        Err(transfer::engine::ClaimError::Busy) => Err("正在下载：同一文件同时只会跑一个任务".into()),
+        Err(transfer::engine::ClaimError::Expired) => Err("确认已过期，请重新解析链接".into()),
+        Err(transfer::engine::ClaimError::NotFound) => Err("会话不存在或已使用，请重新解析链接".into()),
+    }
+}
+
+/// 轮询任务终态（前端注册监听前事件可能已发出的补偿）
+#[tauri::command]
+fn transfer_task_state(app: tauri::AppHandle, task_id: String) -> Result<Option<serde_json::Value>, String> {
+    let state = app.state::<AppState>();
+    let engine = state.engine.get().ok_or("传输引擎未初始化")?;
+    Ok(engine.take_final_event(&task_id))
+}
+
+/// 本地服务状态（§10.2）
+#[tauri::command]
+fn transfer_service_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let state = app.state::<AppState>();
+    let snap = state.service.read().unwrap().status.snapshot();
+    Ok(match snap {
+        LocalServiceStatus::Running { bound_port } => serde_json::json!({"status": "Running", "bound_port": bound_port}),
+        LocalServiceStatus::Failed { requested_port, .. } => serde_json::json!({"status": "Failed", "requested_port": requested_port}),
+        LocalServiceStatus::Starting => serde_json::json!({"status": "Starting"}),
+        LocalServiceStatus::Stopping => serde_json::json!({"status": "Stopping"}),
+        LocalServiceStatus::Stopped => serde_json::json!({"status": "Stopped"}),
+    })
+}
+
+/// 保存并重启本地服务（§10.2：configured_port 变更；端口占用不漂移）
+#[tauri::command]
+fn transfer_service_restart(app: tauri::AppHandle, port: u16) -> Result<serde_json::Value, String> {
+    let state = app.state::<AppState>();
+    let real = state.real_service.get().ok_or("本地服务未初始化")?;
+    let page = include_str!("../assets/transfer-confirm.html");
+    let st = local_server::restart_service(real, port, page);
+    state.set_service_status(st.clone());
+    Ok(match st {
+        LocalServiceStatus::Running { bound_port } => serde_json::json!({"status": "Running", "bound_port": bound_port}),
+        LocalServiceStatus::Failed { requested_port, .. } => serde_json::json!({"status": "Failed", "requested_port": requested_port}),
+        _ => serde_json::json!({"status": "Stopped"}),
+    })
+}
+
+/// 打开下载目录（filecard「打开目录」/ 托盘菜单共用）
+#[tauri::command]
+fn open_download_dir(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = transfer::engine::download_dir_of(&app)?;
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(dir, None::<&str>)
+        .map_err(|e| format!("打开目录失败: {e}"))
 }
 
 /// 向飞书 webhook 发送消息
@@ -520,8 +852,7 @@ fn test_connection(app: tauri::AppHandle, app_id: String, app_secret: String) ->
     write_log(&app, LV_INFO, &format!("test_connection: 连接成功 app_name={}", app_name));
 
     // 3. 探测 im:resource:upload 权限：上传一张 1x1 透明 PNG
-    let has_upload_permission;
-    let apply_url;
+    let upload_perm;
     {
         use base64::Engine;
         let probe_bytes = base64::engine::general_purpose::STANDARD
@@ -544,24 +875,63 @@ fn test_connection(app: tauri::AppHandle, app_id: String, app_secret: String) ->
             .json()
             .map_err(|e| format!("探测响应解析失败: {e}"))?;
         if probe_json["code"].as_i64().unwrap_or(-1) == 0 {
-            has_upload_permission = true;
-            apply_url = None;
             write_log(&app, LV_INFO, "test_connection: im:resource:upload 权限已开通");
+            upload_perm = PermResult { key: "upload".to_string(), ok: true, apply_url: None };
         } else {
-            has_upload_permission = false;
             let msg = probe_json["msg"].as_str().unwrap_or("");
-            apply_url = Some(extract_apply_url(msg, &app_id));
+            let apply_url = extract_apply_url(msg, &app_id, "im:resource:upload");
             write_log(&app, LV_WARN, &format!(
                 "test_connection: 缺少 im:resource:upload 权限 code={} msg={}",
                 probe_json["code"], probe_json["msg"]
             ));
+            upload_perm = PermResult { key: "upload".to_string(), ok: false, apply_url: Some(apply_url) };
         }
     }
 
+    // 4. 探测 drive:drive（云空间）权限：读取云空间根文件夹元信息（设计文档 §11 指定接口）。
+    // 已知边界：root_folder/meta 用 drive:drive 的只读子集也能通过（存在假阳性可能），
+    // 但申请链接固定请求完整的 drive:drive；真正的写操作失败会在传输任务里以 403 呈现。
+    // tenant_access_token 与 bot:v3:info 维持隐式校验：失败即整体连接失败，属凭证错误，无申请链接语义。
+    let drive_perm = {
+        let drive_result = |ok: bool, apply_url: Option<String>| PermResult {
+            key: "drive".to_string(),
+            ok,
+            apply_url,
+        };
+        match client
+            .get("https://open.feishu.cn/open-apis/drive/explorer/v2/root_folder/meta")
+            .bearer_auth(&token)
+            .send()
+        {
+            Ok(resp) => match resp.json::<serde_json::Value>() {
+                Ok(j) if j["code"].as_i64().unwrap_or(-1) == 0 => {
+                    write_log(&app, LV_INFO, "test_connection: drive:drive 权限已开通");
+                    drive_result(true, None)
+                }
+                Ok(j) => {
+                    let msg = j["msg"].as_str().unwrap_or("");
+                    let apply_url = extract_apply_url(msg, &app_id, "drive:drive");
+                    write_log(&app, LV_WARN, &format!(
+                        "test_connection: 缺少 drive:drive 权限 code={} msg={}",
+                        j["code"], j["msg"]
+                    ));
+                    drive_result(false, Some(apply_url))
+                }
+                Err(e) => {
+                    write_log(&app, LV_WARN, &format!("test_connection: drive 权限探测响应解析失败: {e}"));
+                    drive_result(false, None)
+                }
+            },
+            Err(e) => {
+                write_log(&app, LV_WARN, &format!("test_connection: drive 权限探测请求失败: {}", err_chain(&e)));
+                drive_result(false, None)
+            }
+        }
+    };
+
     Ok(ConnTestResult {
         app_name,
-        has_upload_permission,
-        apply_url,
+        permissions: vec![upload_perm, drive_perm],
     })
 }
 
@@ -572,7 +942,12 @@ fn test_connection(app: tauri::AppHandle, app_id: String, app_secret: String) ->
 /// 应用级共享状态（§5.2：Rust `AppState` 持有服务状态、传输快照与菜单项句柄）
 pub struct AppState {
     pub exit: ExitCoordinator,
-    pub service: PhaseAService,
+    /// 阶段 A 为 fake 集合；setup 完成阶段 B 装配后替换为真实现（RwLock 支持替换）
+    pub service: std::sync::RwLock<PhaseAService>,
+    /// 跨网文件传输引擎（setup 时初始化；传输功能属于 dock-tray 阶段 B 落地）
+    pub engine: std::sync::OnceLock<std::sync::Arc<transfer::engine::Engine>>,
+    /// 真实本地服务（setup 时初始化）
+    pub real_service: std::sync::OnceLock<std::sync::Arc<local_server::RealLocalService>>,
     /// 状态项显示端。存为 trait object 以便单测注入替身（A8 的 `unit/fake` 验收）
     pub tray: std::sync::Mutex<Option<std::sync::Arc<dyn tray::StatusDisplay>>>,}
 
@@ -580,7 +955,9 @@ impl AppState {
     fn new() -> Self {
         Self {
             exit: ExitCoordinator::default(),
-            service: PhaseAService::new(),
+            service: std::sync::RwLock::new(PhaseAService::new()),
+            engine: std::sync::OnceLock::new(),
+            real_service: std::sync::OnceLock::new(),
             tray: std::sync::Mutex::new(None),
         }
     }
@@ -590,13 +967,13 @@ impl AppState {
     /// 先更新权威 provider，再刷新菜单项文字。任何改变服务状态的路径都必须走这里，
     /// 否则菜单会一直显示陈旧状态——这正是「`refresh_status` 有定义但零调用」的成因。
     pub fn set_service_status(&self, status: LocalServiceStatus) {
-        self.service.service.set_status(status);
+        self.service.read().unwrap().status.set(status);
         self.sync_tray_status();
     }
 
     /// 按当前权威状态刷新常驻菜单的状态项（文案端口一律取自状态本身，§9.2）
     pub fn sync_tray_status(&self) {
-        let label = self.service.service.snapshot().menu_label();
+        let label = self.service.read().unwrap().status.snapshot().menu_label();
         if let Some(display) = self.tray.lock().unwrap().as_ref() {
             display.show_status(&label);
         }
@@ -624,7 +1001,7 @@ pub fn show_main_window(app: &tauri::AppHandle) {
 pub fn menu_action(app: &tauri::AppHandle, id: &str) {
     match id {
         tray::ID_OPEN_MAIN => show_main_window(app),
-        tray::ID_OPEN_DOWNLOADS => open_download_dir(app),
+        tray::ID_OPEN_DOWNLOADS => open_downloads_dir_for_tray(app),
         // 只读 / 未启用项不应产生事件
         tray::ID_SERVICE_STATUS => log::warn!("service_status 为只读项，不应触发事件"),
         tray::ID_OPEN_SERVICE_SETTINGS => log::warn!("本地服务设置尚未启用（阶段 B）"),
@@ -635,8 +1012,8 @@ pub fn menu_action(app: &tauri::AppHandle, id: &str) {
     }
 }
 
-/// 打开下载目录（§9.5 / A11）：不存在则创建；任何失败都恢复主窗口暴露错误，不静默失败
-fn open_download_dir(app: &tauri::AppHandle) {
+/// 打开下载目录（§9.5 / A11 托盘菜单路径）：不存在则创建；任何失败都恢复主窗口暴露错误，不静默失败
+fn open_downloads_dir_for_tray(app: &tauri::AppHandle) {
     use tauri_plugin_opener::OpenerExt;
 
     let dir = match app.path().download_dir() {
@@ -663,31 +1040,15 @@ fn open_download_dir(app: &tauri::AppHandle) {
 
 /// **仅 debug 构建**：从环境变量播种状态，便于验收需要「启动即处于某状态」的用例。
 ///
-/// 阶段 A 没有真实传输，`TransferSnapshot` 恒为空，因此 A12（忙时退出二次确认）
-/// 的确认分支根本无法到达。用环境变量播种可以在不污染 UI 与 IPC 面的前提下驱动它。
-///
-/// 用法：`QINGNIAO_DEBUG_TRANSFER="cancellable:committing:cleanup"`，例如 `1:0:0`
+/// 阶段 B 起传输快照来自真实引擎（`EngineTransferAdapter`），播种 TransferSnapshot
+/// 的旧路径已移除；真实传输任务可直接通过前端或 `QINGNIAO_DEBUG_TRANSFER=1` 时
+/// 的状态播种来驱动退出确认分支。本函数现仅保留状态播种占位（A12 由真实任务覆盖）。
 #[cfg(debug_assertions)]
-fn seed_debug_state_from_env(app: &tauri::AppHandle) {
-    let Ok(raw) = std::env::var("QINGNIAO_DEBUG_TRANSFER") else {
+fn seed_debug_state_from_env(_app: &tauri::AppHandle) {
+    let Ok(_raw) = std::env::var("QINGNIAO_DEBUG_TRANSFER") else {
         return;
     };
-    let nums: Vec<u32> = raw
-        .split(':')
-        .map(|s| s.trim().parse().unwrap_or(0))
-        .collect();
-    let snapshot = TransferSnapshot {
-        accepting: true,
-        cancellable_count: nums.first().copied().unwrap_or(0),
-        committing_count: nums.get(1).copied().unwrap_or(0),
-        cleanup_pending_count: nums.get(2).copied().unwrap_or(0),
-        checkpointed: false,
-    };
-    log::warn!("已从环境变量播种传输快照: {snapshot:?}");
-    app.state::<AppState>()
-        .service
-        .transfer
-        .set_snapshot(snapshot);
+    log::warn!("QINGNIAO_DEBUG_TRANSFER 已忽略：传输快照现由真实引擎提供");
 }
 
 /// 最终清理：由退出协议在 `Draining` 阶段调用（§7.2.2 第 3.4 / 3.5 步与第 4 步）
@@ -697,12 +1058,14 @@ struct AppCleanup {
 
 impl FinalCleanup for AppCleanup {
     fn stop_listener(&self) {
-        // 阶段 A：由 fake 控制器停止；阶段 B 在此接入真实 HTTP listener 的停机与端口释放
+        // 阶段 B：真实 HTTP listener 停机与端口释放（§10.1 退出门闩由 stop_accepting 先行）
         let state = self.app.state::<AppState>();
-        state.service.service.stop();
+        let svc = state.service.read().unwrap();
+        svc.service.stop();
+        svc.status.set(LocalServiceStatus::Stopped);
         // 状态迁移后立即推送菜单文案（§5.2）
         state.sync_tray_status();
-        log::info!("本地服务已停止: {:?}", state.service.service.snapshot());
+        log::info!("本地服务已停止: {:?}", svc.status.snapshot());
     }
 
     fn remove_tray(&self) {
@@ -765,11 +1128,12 @@ fn show_quit_dialog(app: &tauri::AppHandle, snapshot: TransferSnapshot) {
 fn resume_quit(app: &tauri::AppHandle, confirmed: bool) {
     let state = app.state::<AppState>();
     let cleanup = AppCleanup { app: app.clone() };
+    let svc = state.service.read().unwrap();
     let step = state.exit.after_confirm(
         confirmed,
-        state.service.service.as_ref(),
-        state.service.transfer.as_ref(),
-        state.service.transfer.as_ref(),
+        svc.service.as_ref(),
+        svc.transfer.as_ref(),
+        svc.transfer_ctrl.as_ref(),
         &cleanup,
     );
     report_quit_step(app, step);
@@ -779,11 +1143,12 @@ fn resume_quit(app: &tauri::AppHandle, confirmed: bool) {
 pub fn request_quit(app: &tauri::AppHandle, source: QuitSource) {
     let state = app.state::<AppState>();
     let cleanup = AppCleanup { app: app.clone() };
+    let svc = state.service.read().unwrap();
     let step = state.exit.begin_quit(
         source,
-        state.service.service.as_ref(),
-        state.service.transfer.as_ref(),
-        state.service.transfer.as_ref(),
+        svc.service.as_ref(),
+        svc.transfer.as_ref(),
+        svc.transfer_ctrl.as_ref(),
         &cleanup,
     );
     report_quit_step(app, step);
@@ -841,6 +1206,20 @@ pub fn run() {
             upload_image,
             test_connection,
             log_event,
+            read_file_base64,
+            key_status,
+            key_generate,
+            key_export,
+            key_import,
+            key_rotate,
+            transfer_start_upload,
+            transfer_cancel,
+            transfer_parse_payload,
+            transfer_confirm_download,
+            transfer_task_state,
+            transfer_service_status,
+            transfer_service_restart,
+            open_download_dir,
             // 仅 debug：A8 状态刷新的驱动入口
             #[cfg(debug_assertions)]
             debug_set_service_status
@@ -849,6 +1228,53 @@ pub fn run() {
             // 先装 logger，之后的 tray / 生命周期日志才有处可去
             install_file_logger(app.handle());
             log::info!("青鸟启动：单实例判定通过，开始初始化常驻功能");
+
+            // ===== 传输功能装配（dock-tray 阶段 B）=====
+            // 1. 引擎：<app_config_dir>/transfer（quota.json / consumed.json 等持久化在此）
+            let configured_port = {
+                let cfg_path = app.path().app_config_dir()
+                    .map_err(|e| format!("无法定位配置目录: {e}"))?
+                    .join("qingniao.json");
+                std::fs::read_to_string(&cfg_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                    .and_then(|v| v.pointer("/transfer/configured_port").and_then(|x| x.as_u64()))
+                    .map(|v| v as u16)
+            };
+            let work_dir = app.path().app_config_dir()
+                .map_err(|e| format!("无法定位配置目录: {e}"))?
+                .join("transfer");
+            let engine = transfer::engine::Engine::open(work_dir, app.handle().clone())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            let engine = std::sync::Arc::new(engine);
+            let _ = app.state::<AppState>().engine.set(engine.clone());
+
+            // 2. 真实本地服务 + 状态源（StatusCell）
+            let cell = std::sync::Arc::new(service::StatusCell::new(LocalServiceStatus::Starting));
+            let real = local_server::RealLocalService::new(cell.clone(), engine.clone());
+            let _ = app.state::<AppState>().real_service.set(real.clone());
+
+            // 3. 启动本地服务（端口占用不漂移，落 Failed{PortInUse}）
+            let port = configured_port.unwrap_or(DEFAULT_LOCAL_PORT);
+            let page = include_str!("../assets/transfer-confirm.html");
+            let start_status = local_server::restart_service(&real, port, page);
+            app.state::<AppState>().set_service_status(start_status);
+
+            // 4. 替换 AppState.service 为真实集合（退出协议 / 菜单走真实现）
+            let adapter = std::sync::Arc::new(EngineTransferAdapter(engine.clone()));
+            *app.state::<AppState>().service.write().unwrap() = service::PhaseAService::with_parts(
+                cell,
+                real,
+                adapter.clone(),
+                adapter,
+            );
+            log::info!("传输功能装配完成：configured_port={port}");
+
+            // 5. 删除重试队列兜底（§9.4 幂等恢复）
+            {
+                let cfg = read_app_config(app.handle());
+                engine.retry_pending_deletes(&cfg.app_id, &cfg.app_secret);
+            }
 
             // §8.1：仅在主实例、且 single-instance 判定之后构造**唯一**的 tray
             let handles = tray::build_tray(app.handle())?;

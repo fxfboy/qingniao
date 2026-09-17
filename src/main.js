@@ -1,19 +1,40 @@
-/* 青鸟 · 飞书消息助手 — Tauri 前端 */
+/* 青鸟 · 飞书消息助手 — Tauri 前端（v2 原型落地版） */
 (function(){
 'use strict';
 
 /* ===================== 工具 ===================== */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const uid = () => 'a' + (++attIdSeq) + '_' + Date.now().toString(36);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const nowIso = () => new Date().toISOString();
+const fmtSize = b => {
+  b = Number(b) || 0;
+  if (b >= 1073741824) return (b/1073741824).toFixed(2) + ' GB';
+  if (b >= 1048576)    return (b/1048576).toFixed(1) + ' MB';
+  if (b >= 1024)       return Math.round(b/1024) + ' KB';
+  return b + ' B';
+};
+const fmtClock = d => ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
+const dayKey = iso => { const d = new Date(iso); return d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate(); };
+const dayLabel = iso => {
+  const d = new Date(iso), now = new Date();
+  const yest = new Date(now); yest.setDate(now.getDate()-1);
+  const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()];
+  if (d.toDateString() === now.toDateString()) return '今天';
+  if (d.toDateString() === yest.toDateString()) return '昨天';
+  return (d.getMonth()+1) + '月' + d.getDate() + '日 · ' + wd;
+};
 
 /* ===================== Tauri 封装 ===================== */
-const invoke = window.__TAURI__ ? window.__TAURI__.core.invoke : null;
+const TAURI = window.__TAURI__ || null;
+const invoke = TAURI ? TAURI.core.invoke : null;
 if(!invoke){ console.warn('Tauri 不可用，部分功能将降级'); }
+async function listenEvent(name, handler){
+  if(!TAURI || !TAURI.event) return;
+  try{ await TAURI.event.listen(name, handler); }catch(e){ console.error('监听失败:', name, e); }
+}
 
 /* ===================== 日志 ===================== */
-// 写入 <配置目录>/qingniao.log（与配置文件同目录），同时输出到控制台
 async function log(level, msg){
   try{
     const line = '[青鸟] ' + msg;
@@ -26,7 +47,6 @@ async function log(level, msg){
     catch(e){ console.error('写入日志文件失败:', e); }
   }
 }
-// 捕获前端未处理异常，一并写入日志
 window.addEventListener('error', e => {
   const msg = e.message || (e.error && e.error.stack) || '未知错误';
   log('error', '未捕获异常: ' + msg);
@@ -39,28 +59,26 @@ window.addEventListener('unhandledrejection', e => {
 
 /* ===================== 状态 ===================== */
 let config = null;
-let attachments = [];
-let forcedType = 'auto';
-let attIdSeq = 0;
-
-/* ===================== DOM 引用 ===================== */
-const editor    = $('#editor');
-const hintEl    = $('.hint');
-const attStrip  = $('#attachments');
-const counter   = $('#counter');
-const typePill  = $('#typePill');
-const whyText   = $('#whyText');
-const sendBtn   = $('.send');
-const resultEl  = $('.result');
-const historyUl = $('.history ul');
-const segBtns   = $$('.intent .seg button');
+let attSeq = 0;                 // chip / 记录序号
+let hotkeyMode = 'mod';         // 'mod' | 'enter'
+let pendingFile = null;         // 确认弹窗中的待发文件 {path, name, size}
+let liveTasks = new Map();      // task_id -> {record, el}
+let importFpOk = false;
 
 /* ===================== 配置加载/保存 ===================== */
+function defaultConfig(){
+  return {
+    schema_version: 2,
+    webhooks: [], history: [], last_webhook: 0, last_type: 'auto',
+    app_id: '', app_secret: '',
+    theme: 'auto',
+    transfer: { configured_port: 9876, download_dir: null }
+  };
+}
 async function loadConfig(){
   if(invoke){
-    try{
-      config = await invoke('load_config');
-    }catch(e){
+    try{ config = await invoke('load_config'); }
+    catch(e){
       console.error('加载配置失败:', e);
       log('error', '加载配置失败: ' + (e.message || e));
       config = defaultConfig();
@@ -70,30 +88,235 @@ async function loadConfig(){
   }
   if(!config.webhooks) config.webhooks = [];
   if(!config.history) config.history = [];
-  if(config.last_webhook === undefined || config.last_webhook === null) config.last_webhook = 0;
+  if(config.last_webhook === undefined || config.last_webhook === null || config.last_webhook >= config.webhooks.length) config.last_webhook = 0;
   if(!config.last_type) config.last_type = 'auto';
   if(!config.app_id) config.app_id = '';
   if(!config.app_secret) config.app_secret = '';
-  forcedType = config.last_type || 'auto';
-}
-function defaultConfig(){
-  return {webhooks:[], history:[], last_webhook:0, last_type:'auto', app_id:'', app_secret:''};
-}
-async function saveConfig(){
-  if(invoke){
-    try{ await invoke('save_config', {config}); }
-    catch(e){ console.error('保存配置失败:', e); log('error', '保存配置失败: ' + (e.message || e)); }
+  if(!config.theme) config.theme = 'auto';
+  if(!config.transfer) config.transfer = { configured_port: 9876, download_dir: null };
+  if(!config.transfer.configured_port) config.transfer.configured_port = 9876;
+  // 旧版记录字段迁移：msg_type -> kind
+  for(const h of config.history){
+    if(!h.kind && h.msg_type) h.kind = h.msg_type;
+    if(!h.kind) h.kind = 'post';
+    if(!h.dir) h.dir = 'out';
   }
+  hotkeyMode = config.hotkey === 'enter' ? 'enter' : 'mod';
+}
+let saveTimer = null;
+function saveConfig(){
+  // 短去抖合并写盘
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    if(invoke){
+      try{ await invoke('save_config', {config}); }
+      catch(e){ console.error('保存配置失败:', e); log('error', '保存配置失败: ' + (e.message || e)); }
+    }
+  }, 120);
 }
 
-/* ===================== 签名（Web Crypto） ===================== */
-async function hmacSign(secret, timestamp){
-  const key = timestamp + '\n' + secret;
-  const enc = new TextEncoder();
-  const ck = await crypto.subtle.importKey('raw', enc.encode(key), {name:'HMAC', hash:'SHA-256'}, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', ck, enc.encode(''));
-  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+/* ===================== Toast ===================== */
+let toastTimer = null;
+function toast(msg, meta, kind){
+  const t = $('#toast');
+  $('#toastText').textContent = msg;
+  $('#toastMeta').textContent = meta || '';
+  t.classList.toggle('err', kind === 'err');
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
 }
+
+/* ===================== 主题 ===================== */
+const themeMql = window.matchMedia('(prefers-color-scheme: dark)');
+function applyTheme(pref){
+  const resolved = pref === 'dark' || pref === 'light' ? pref : (themeMql.matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.themePref = pref;
+}
+themeMql.addEventListener('change', () => {
+  if((document.documentElement.dataset.themePref || 'auto') === 'auto') applyTheme('auto');
+});
+function initThemeCards(){
+  $$('.theme-card').forEach(c => {
+    const on = c.dataset.theme === (config.theme || 'auto');
+    c.classList.toggle('active', on);
+    c.setAttribute('aria-pressed', String(on));
+    c.onclick = () => {
+      $$('.theme-card').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-pressed','false'); });
+      c.classList.add('active'); c.setAttribute('aria-pressed','true');
+      config.theme = c.dataset.theme;
+      applyTheme(config.theme);
+      saveConfig();
+    };
+  });
+}
+
+/* ===================== 编辑器（contenteditable） ===================== */
+const ed = $('#editor');
+const expEd = $('#expandEd');
+const RANGES = new Map();
+
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  [ed, expEd].forEach(el => { if (el.contains(r.commonAncestorContainer)) RANGES.set(el, r.cloneRange()); });
+});
+
+function hasChips(el){ return !!el.querySelector('.chip'); }
+// 读取编辑器文本时排除图片 chip 内部的文件名/×按钮文字，避免被当作消息正文
+function edText(el){
+  const chips = $$('.chip', el);
+  if (!chips.length) return el.innerText || '';
+  const prev = chips.map(c => c.style.display);
+  chips.forEach(c => { c.style.display = 'none'; });
+  const t = el.innerText || '';
+  chips.forEach((c, i) => { c.style.display = prev[i]; });
+  return t;
+}
+function isBlank(el){ return (el.innerText||'').replace(/\u200b/g,'').trim() === '' && !hasChips(el); }
+function syncEmpty(el){
+  if((el.innerText||'').replace(/\u200b/g,'').trim() === '' && !hasChips(el)) el.innerHTML = '';
+  el.classList.toggle('is-empty', isBlank(el));
+}
+function countChars(el){ return ((edText(el)||'').replace(/\s/g,'')).length; }
+function activeEd(){ return $('#expand').classList.contains('show') ? expEd : ed; }
+
+const TYPE_LABEL = { text:'文本', post:'富文本', image:'图片', interactive:'交互卡片' };
+function detect(el){
+  const text = edText(el);
+  const chips = $$('.chip', el).length;
+  const hasMd = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|^#{1,3}\s|^[-*]\s|^>\s|^\d+\.\s)/m.test(text);
+  const hasAt = /@所有人|@[^\s@]{1,12}/.test(text);
+  if (/```card|\{\s*"config"|\{\s*"header"/.test(text))
+    return { t:'interactive', why:'检测到 <b>卡片 JSON</b>，将以交互卡片渲染' };
+  if (chips && !text.trim())
+    return { t:'image', why:'仅包含 <b>' + chips + ' 张图片</b>，采用图片消息发送' };
+  if (chips || hasMd || hasAt)
+    return { t:'post', why:'检测到 <b>' + [chips && (chips + ' 张图片'), hasMd && 'Markdown', hasAt && '@ 提及'].filter(Boolean).join('、') + '</b>，纯文本无法完整呈现' };
+  if (!text.trim())
+    return { t:'text', why:'编辑器为空 · 输入内容后会自动判断消息类型' };
+  return { t:'text', why:'纯文字消息，直接以 text 类型发送' };
+}
+function forcedType(){
+  const v = config.last_type || 'auto';
+  return v === 'auto' || TYPE_LABEL[v] ? v : 'auto';
+}
+function refresh(){
+  const el = activeEd();
+  const d = detect(el);
+  const ft = forcedType();
+  const finalType = ft === 'auto' ? d.t : ft;
+  const pill = $('#typePill');
+  pill.className = 'dpill ' + (finalType === 'interactive' ? 'interactive' : finalType);
+  pill.textContent = TYPE_LABEL[finalType] || '文本';
+  $('#whyText').innerHTML = ft === 'auto' ? d.why :
+    '已指定为 <b>' + TYPE_LABEL[ft] + '</b>（识别结果：' + TYPE_LABEL[d.t] + '）';
+
+  const n = countChars(el);
+  $('#counter').textContent = n ? n + ' 字' : '';
+  $('#expandCount').textContent = n + ' 字';
+
+  const ready = !isBlank(el);
+  [$('#btnSend'), $('#expandSend')].forEach(b => {
+    b.classList.toggle('ready', ready);
+    b.setAttribute('aria-disabled', String(!ready));
+  });
+}
+function updateBotLabels(){
+  const bot = config.webhooks[config.last_webhook];
+  const name = bot ? bot.name : '未设置';
+  $('#confirmTarget').textContent = name;
+  $('#convName').textContent = bot ? bot.name : '消息记录';
+  ed.setAttribute('data-ph', '发送给 ' + name);
+  ed.setAttribute('aria-label', '发送给 ' + name);
+}
+[ed, expEd].forEach(el => {
+  el.addEventListener('input', ev => {
+    if (ev && ev.isComposing){ refresh(); return; }
+    syncEmpty(el); refresh();
+  });
+  el.addEventListener('blur', () => syncEmpty(el));
+  el.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    if (e.shiftKey) return;
+    const sendOnEnter = hotkeyMode === 'enter' ? !e.isComposing : (e.metaKey || e.ctrlKey);
+    if (sendOnEnter){ e.preventDefault(); send(); }
+  });
+  el.addEventListener('paste', e => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const it of items){
+      if (it.type && it.type.indexOf('image/') === 0){
+        e.preventDefault();
+        const f = it.getAsFile();
+        const r = new FileReader();
+        r.onload = ev => insertChip(el, f && f.name ? f.name : '粘贴的图片.png', ev.target.result);
+        r.readAsDataURL(f);
+      }
+    }
+  });
+});
+
+function insertNode(el, node){
+  const r = RANGES.get(el);
+  if (r && el.contains(r.commonAncestorContainer)){
+    r.deleteContents(); r.insertNode(node);
+    const after = document.createRange();
+    after.setStartAfter(node); after.collapse(true);
+    RANGES.set(el, after);
+  } else {
+    el.appendChild(node);
+  }
+  el.focus();
+  if (RANGES.get(el)){
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(RANGES.get(el));
+  }
+  syncEmpty(el); refresh();
+}
+const TONES = ['', 'b', 'c'];
+function insertChip(el, name, dataUrl){
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.setAttribute('contenteditable', 'false');
+  chip.setAttribute('data-name', name);
+  chip.innerHTML = '<span class="cthumb ' + TONES[attSeq++ % 3] + '"></span><span class="cnm"></span>' +
+                   '<button class="cx" type="button" aria-label="移除这张图片">×</button>';
+  chip.querySelector('.cnm').textContent = name;
+  if (dataUrl) chip.querySelector('.cthumb').style.backgroundImage = 'url(' + dataUrl + ')';
+  chip._dataUrl = dataUrl || '';
+  insertNode(el, chip);
+  uploadChip(chip);
+  return chip;
+}
+function uploadChip(chip){
+  if(!(invoke && config.app_id && config.app_secret)){
+    chip.classList.add('err');
+    chip.title = '未配置飞书应用凭证，无法换取 image_key';
+    return;
+  }
+  const base64 = (chip._dataUrl || '').split(',')[1];
+  if(!base64){ chip.classList.add('err'); chip.title = '无图片数据'; return; }
+  invoke('upload_image', { imageBase64: base64, filename: chip.dataset.name, appId: config.app_id, appSecret: config.app_secret })
+    .then(key => { chip._imageKey = key; chip.classList.remove('err'); chip.title = 'image_key 已换取'; })
+    .catch(e => {
+      chip.classList.add('err');
+      chip.title = '上传失败：' + (e.message || e);
+      log('error', '图片上传失败 ' + chip.dataset.name + ' → ' + (e.message || e));
+    });
+}
+[ed, expEd].forEach(el => {
+  el.addEventListener('click', e => {
+    const x = e.target.closest('.cx');
+    if (!x) return;
+    e.preventDefault(); e.stopPropagation();
+    const chip = x.closest('.chip');
+    if (chip) chip.remove();
+    syncEmpty(el); refresh();
+  });
+});
 
 /* ===================== Markdown → 飞书 post ===================== */
 function parseInline(text){
@@ -119,379 +342,849 @@ function parseInline(text){
   }
   return out;
 }
-
-function mdToPost(md, attImageKeys){
+function mdToPost(md, attImageKeys, titleOverride){
   const lines = md.split('\n');
-  let title = '';
+  let title = titleOverride || '';
   const content = [];
   let inCodeBlock = false;
   let codeLines = [];
   for(const line of lines){
-    // 代码块边界
     if(line.trim().startsWith('```')){
       if(inCodeBlock){
-        // 结束代码块：逐行输出为纯文本（飞书 webhook post 不支持 code 标签）
-        for(const cl of codeLines){
-          content.push([{tag:'text', text: cl || ' '}]);
-        }
-        codeLines = [];
-        inCodeBlock = false;
-      } else {
-        inCodeBlock = true;
-      }
+        for(const cl of codeLines) content.push([{tag:'text', text: cl || ' '}]);
+        codeLines = []; inCodeBlock = false;
+      } else { inCodeBlock = true; }
       continue;
     }
     if(inCodeBlock){ codeLines.push(line); continue; }
-    // 标题
     if(!title && line.startsWith('# ')){ title = line.slice(2).trim(); continue; }
     if(line.trim() === '') continue;
-    // 引用块：去掉行首的 > 和空格
     let processed = line;
     if(processed.startsWith('> ')) processed = processed.slice(2);
     else if(processed.startsWith('>')) processed = processed.slice(1);
     const inline = parseInline(processed);
     if(inline.length) content.push(inline);
   }
-  // 处理未闭合的代码块
   if(inCodeBlock && codeLines.length){
-    for(const cl of codeLines){
-      content.push([{tag:'text', text: cl || ' '}]);
-    }
+    for(const cl of codeLines) content.push([{tag:'text', text: cl || ' '}]);
   }
   for(const key of attImageKeys) content.push([{tag:'img', image_key:key}]);
   return {msg_type:'post', content:{post:{zh_cn:{title, content}}}};
 }
 
-/* ===================== 智能识别 ===================== */
-function detect(text, attCount){
-  const hasImg = attCount > 0;
-  const hasMd  = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|^#{1,3}\s|^[-*]\s|^>\s|^\d+\.\s)/m.test(text);
-  const hasAt  = /<at\s+user_id=|@所有人/.test(text);
-  const hasCard = /```card|\{\s*"config"|\{\s*"header"/.test(text);
-  if(hasCard) return {t:'interactive', label:'交互卡片', why:'检测到 <b>卡片 JSON 或按钮定义</b>，将以交互卡片渲染'};
-  if(hasImg && !text.trim()) return {t:'image', label:'图片', why:'仅包含 <b>'+attCount+' 张图片</b>，采用图片消息发送'};
-  if(hasImg || hasMd || hasAt){
-    const r = [hasMd&&'Markdown', hasAt&&'@ 提及', hasImg&&'图片附件'].filter(Boolean).join('、');
-    return {t:'post', label:'富文本', why:'检测到 <b>'+r+'</b>，纯文本无法完整呈现'};
-  }
-  if(!text.trim()) return {t:'text', label:'文本', why:'编辑器为空 · 输入内容后会自动判断'};
-  return {t:'text', label:'文本', why:'纯文字消息，直接以 text 类型发送'};
+/* ===================== 消息组装与发送 ===================== */
+async function hmacSign(secret, timestamp){
+  const key = timestamp + '\n' + secret;
+  const enc = new TextEncoder();
+  const ck = await crypto.subtle.importKey('raw', enc.encode(key), {name:'HMAC', hash:'SHA-256'}, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', ck, enc.encode(''));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
 }
-
-function refreshIntent(){
-  const t = editor.value;
-  counter.textContent = t.replace(/\s/g,'').length + ' 字';
-  hintEl.classList.toggle('hidden', !!t.trim());
-  sendBtn.disabled = !t.trim() && attachments.length === 0;
-  const d = detect(t, attachments.length);
-  const finalType = forcedType === 'auto' ? d.t : forcedType;
-  typePill.className = 'type-pill ' + (finalType === 'interactive' ? 'card' : finalType);
-  const labelMap = {text:'文本', post:'富文本', image:'图片', interactive:'交互卡片'};
-  typePill.textContent = labelMap[finalType] || '文本';
-  if(forcedType === 'auto'){ whyText.innerHTML = d.why; }
-  else {
-    const same = d.t === forcedType;
-    whyText.innerHTML = same ? '与智能识别一致 · '+d.why
-      : '已手动指定为 <b>'+labelMap[forcedType]+'</b>（识别结果：'+labelMap[d.t]+'）';
-  }
-}
-
-/* ===================== 消息组装 ===================== */
 function extractCardJson(text){
   let t = text.trim().replace(/^```card\s*/i,'').replace(/```\s*$/,'').trim();
-  try {
-    return JSON.parse(t);
-  } catch(e) {
-    // 普通文本自动包装为基础卡片：第一行作标题，其余作正文
+  try { return JSON.parse(t); }
+  catch(e) {
     const lines = text.trim().split('\n').filter(l => l.trim() !== '');
-    const card = {
-      config: {wide_screen_mode: true},
-      elements: []
-    };
+    const card = { config: {wide_screen_mode: true}, elements: [] };
     if(lines.length){
       const title = lines[0];
       const body = lines.slice(1).join('\n');
-      card.header = {
-        title: {tag: 'plain_text', content: title},
-        template: 'blue'
-      };
-      if(body){
-        card.elements.push({tag: 'div', text: {tag: 'lark_md', content: body}});
-      }
+      card.header = { title: {tag: 'plain_text', content: title}, template: 'blue' };
+      if(body) card.elements.push({tag: 'div', text: {tag: 'lark_md', content: body}});
     }
     return card;
   }
 }
-function buildPayload(text, type){
-  const imgKeys = attachments.filter(a => a.imageKey).map(a => a.imageKey);
+function buildPayload(text, type, imgKeys, title){
   switch(type){
     case 'text':  return {msg_type:'text', content:{text}};
-    case 'post':  return mdToPost(text, imgKeys);
+    case 'post':  return mdToPost(text, imgKeys, title);
     case 'image':
       if(!imgKeys.length) throw new Error('没有可用的 image_key，请等待图片上传完成');
       return {msg_type:'image', content:{image_key:imgKeys[0]}};
     case 'interactive': {
       const card = extractCardJson(text);
-      // 把图片附件作为 img 元素追加到卡片，避免手动选交互卡片时图片丢失
       if(imgKeys.length && Array.isArray(card.elements)){
         for(const key of imgKeys){
-          card.elements.push({
-            tag: 'img',
-            img_key: key,
-            alt: {tag: 'plain_text', content: '图片'}
-          });
+          card.elements.push({tag: 'img', img_key: key, alt: {tag: 'plain_text', content: '图片'}});
         }
       }
       return {msg_type:'interactive', card};
     }
   }
 }
-
-/* ===================== 发送 ===================== */
-async function send(){
-  const bot = config.webhooks[config.last_webhook];
-  if(!bot){ setResult(false,'未配置机器人'); log('warn', '发送被拒绝: 未配置机器人'); return; }
-  const text = editor.value;
-  const d = detect(text, attachments.length);
-  const type = forcedType === 'auto' ? d.t : forcedType;
-  if(type !== 'image' && !text.trim() && attachments.length === 0){ setResult(false,'内容为空'); log('warn', '发送被拒绝: 内容为空'); return; }
-
-  const uploading = attachments.filter(a => a.status === 'uploading');
-  if(uploading.length){ setResult(false,'图片仍在上传中，请稍候'); log('warn', '发送被拒绝: 图片仍在上传中'); return; }
-
-  let payload;
-  try{ payload = buildPayload(text, type); }
-  catch(e){ setResult(false,'消息组装失败：'+e.message); log('error', '消息组装失败: ' + e.message); return; }
-
-  if(bot.secret){
-    const ts = Math.floor(Date.now()/1000).toString();
-    payload.timestamp = ts;
-    payload.sign = await hmacSign(bot.secret, ts);
-  }
-
-  sendBtn.disabled = true; sendBtn.style.opacity = '0.6';
-  setResult(null,'发送中…');
-  const t0 = performance.now();
-  log('info', 'send: 开始发送 type=' + type + ' 机器人=' + (bot.name || '?'));
-
-  try{
-    let respText;
-    if(invoke){
-      respText = await invoke('send_webhook', {url: bot.url, payload});
-    } else {
-      // 降级：浏览器 fetch
-      const resp = await fetch(bot.url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-      respText = 'HTTP ' + resp.status + ': ' + await resp.text();
-    }
-    const dt = Math.round(performance.now() - t0);
-    // 解析 "HTTP 200: {json}"
-    const m = respText.match(/^HTTP (\d+):\s*(.*)$/s);
-    const httpStatus = m ? parseInt(m[1]) : 0;
-    const body = m ? m[2] : respText;
-    let ok = httpStatus >= 200 && httpStatus < 300;
-    let msg = 'HTTP ' + httpStatus;
-    try{
-      const j = JSON.parse(body);
-      if(j.code === 0){ ok = true; msg = '200 OK'; }
-      else if(j.code !== undefined){ ok = false; msg = j.code + ' ' + (j.msg||''); }
-    }catch(e){}
-    setResult(ok, msg + ' · ' + dt + 'ms');
-    log(ok ? 'info' : 'error', 'send: 完成 type=' + type + ' ' + msg + ' · ' + dt + 'ms');
-    addHistory({time: fmtTime(new Date()), msg_type: type, summary: makePreview(text, type), ok, status: msg, payload});
-  }catch(e){
-    setResult(false,'发送失败：'+e.message);
-    log('error', 'send: 发送失败 ' + (e.message || e));
-    addHistory({time: fmtTime(new Date()), msg_type: type, summary: makePreview(text, type), ok:false, status:'发送失败', payload:{}});
-  }finally{
-    sendBtn.style.opacity = '';
-    sendBtn.disabled = !editor.value.trim() && attachments.length === 0;
-  }
-}
 function makePreview(text, type){
-  if(type === 'image') return attachments.map(a=>a.name).join(', ')+' ('+attachments.length+' 张附件)';
+  if(type === 'image') return '图片消息';
   if(type === 'interactive') return '交互卡片消息';
   return (text.split('\n')[0]||'').slice(0,60) || '(空)';
 }
+async function sendWebhook(payload){
+  const bot = config.webhooks[config.last_webhook];
+  if(!bot) throw '未配置机器人';
+  if(bot.secret){
+    const ts = Math.floor(Date.now()/1000).toString();
+    payload = Object.assign({}, payload, {timestamp: ts, sign: await hmacSign(bot.secret, ts)});
+  }
+  if(!invoke) throw 'Tauri 环境不可用';
+  const respText = await invoke('send_webhook', {url: bot.url, payload});
+  const m = respText.match(/^HTTP (\d+):\s*(.*)$/s);
+  const httpStatus = m ? parseInt(m[1]) : 0;
+  const body = m ? m[2] : respText;
+  let ok = httpStatus >= 200 && httpStatus < 300;
+  let msg = 'HTTP ' + httpStatus;
+  try{
+    const j = JSON.parse(body);
+    if(j.code === 0){ ok = true; msg = '200 OK'; }
+    else if(j.code !== undefined){ ok = false; msg = j.code + ' ' + (j.msg||''); }
+  }catch(e){}
+  return {ok, msg};
+}
 
-/* ===================== 结果 toast ===================== */
-function setResult(ok, msg){
-  resultEl.classList.remove('ok','err');
-  if(ok === true) resultEl.classList.add('ok');
-  else if(ok === false) resultEl.classList.add('err');
-  const span = resultEl.querySelector('span:nth-child(2)');
-  const code = resultEl.querySelector('code');
-  if(ok === null){ span.innerHTML = '<b>'+esc(msg)+'</b>'; if(code) code.textContent = ''; }
-  else {
-    span.innerHTML = ok ? '上次发送 <b style="color:var(--fg);font-weight:500">成功</b>' : '上次发送 <b style="color:var(--danger);font-weight:500">失败</b>';
-    if(code) code.textContent = msg;
+/* 编辑器内容收集 */
+function collectEd(el){
+  const text = edText(el).replace(/\u200b/g,'').replace(/\n{3,}/g,'\n\n').trim();
+  const chips = $$('.chip', el);
+  const imgKeys = chips.filter(c => c._imageKey).map(c => c._imageKey);
+  const pending = chips.filter(c => !c._imageKey && !c.classList.contains('err')).length;
+  return {text, chips, imgKeys, pending};
+}
+
+/* 生成小尺寸缩略图 dataURL（用于历史记录展示，避免完整图片撑大本地配置） */
+function makeThumb(dataUrl){
+  return new Promise(res => {
+    if(!dataUrl){ res(''); return; }
+    const img = new Image();
+    img.onload = () => {
+      try{
+        const s = Math.min(1, 96 / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * s));
+        c.height = Math.max(1, Math.round(img.height * s));
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        res(c.toDataURL('image/jpeg', 0.7));
+      }catch(e){ res(''); }
+    };
+    img.onerror = () => res('');
+    img.src = dataUrl;
+  });
+}
+
+async function send(){
+  const el = activeEd();
+  if (isBlank(el)) return;
+  const bot = config.webhooks[config.last_webhook];
+  if(!bot){ toast('未配置机器人', '请先在配置中添加', 'err'); return; }
+
+  const {text, chips, imgKeys, pending} = collectEd(el);
+  if(pending){ toast('图片仍在上传中，请稍候', '', 'err'); return; }
+  const d = detect(el);
+  const type = forcedType() === 'auto' ? d.t : forcedType();
+  if(type !== 'image' && !text.trim() && !chips.length){ toast('内容为空', '', 'err'); return; }
+
+  let payload;
+  try{
+    const title = el === expEd ? ($('#expandTitle').value.trim() || '') : '';
+    payload = buildPayload(text, type, imgKeys, title);
+  }catch(e){ toast('消息组装失败', e.message, 'err'); return; }
+
+  // 记录用的图片元数据（与 imgKeys 同序）
+  const keyed = chips.filter(c => c._imageKey);
+  const thumbs = keyed.length ? await Promise.all(keyed.map(c => makeThumb(c._dataUrl))) : [];
+  const media = keyed.length ? {
+    image_names: keyed.map(c => c.dataset.name),
+    img_keys: keyed.map(c => c._imageKey),
+    thumbs
+  } : {};
+
+  const t0 = performance.now();
+  log('info', 'send: 开始发送 type=' + type + ' 机器人=' + (bot.name || '?'));
+  try{
+    const r = await sendWebhook(payload);
+    const dt = Math.round(performance.now() - t0);
+    log((r.ok ? 'info' : 'error'), 'send: 完成 type=' + type + ' ' + r.msg + ' · ' + dt + 'ms');
+    const rec = {
+      time: nowIso(), kind: type, dir: 'out',
+      summary: makePreview(text, type), ok: r.ok, status: r.msg,
+      payload, ...media
+    };
+    if (type === 'text' || type === 'post') rec.text = text;
+    if (type === 'image') rec.summary = chips.map(c=>c.dataset.name).join(', ') + ' (' + chips.length + ' 张图)';
+    addRecord(rec);
+    el.innerHTML = '';
+    syncEmpty(el); refresh();
+    if(el === expEd) $('#expandTitle').value = '';
+    toast(r.ok ? ('已发送到 ' + bot.name) : '发送失败', r.msg, r.ok ? '' : 'err');
+  }catch(e){
+    const msg = typeof e === 'string' ? e : (e && e.message) || String(e);
+    log('error', 'send: 发送失败 ' + msg);
+    addRecord({time: nowIso(), kind: type, dir:'out', summary: makePreview(text, type), ok:false, status:'发送失败', payload, ...media});
+    toast('发送失败', msg, 'err');
   }
 }
 
-/* ===================== 发送历史 ===================== */
-function fmtTime(d){
-  const pad = n => String(n).padStart(2,'0');
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  if(sameDay) return '今天 '+pad(d.getHours())+':'+pad(d.getMinutes());
-  const yest = new Date(now); yest.setDate(now.getDate()-1);
-  if(d.toDateString() === yest.toDateString()) return '昨天 '+pad(d.getHours())+':'+pad(d.getMinutes());
-  return (d.getMonth()+1)+'/'+d.getDate()+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+/* ===================== 消息流渲染 ===================== */
+const BIRD = '<svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/></svg>';
+const OK_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+const WARN_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/></svg>';
+const FILE_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>';
+const X_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+const COPY_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+const RESEND_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg>';
+
+function inlineHtml(s){
+  let out = esc(s);
+  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+  out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="#" data-href="$2">$1</a>');
+  out = out.replace(/@(所有人|[^\s@<]{1,12})/g, '<span class="at">@$1</span>');
+  return out;
 }
-function renderHistory(){
-  historyUl.innerHTML = '';
-  if(!config.history.length){
-    historyUl.innerHTML = '<li class="empty">暂无发送记录</li>';
+function renderTextHtml(raw){
+  const lines = String(raw).split('\n'); let html = '', inUl = false;
+  const closeUl = () => { if (inUl){ html += '</ul>'; inUl = false; } };
+  for (const line of lines){
+    const t = line.trim();
+    if (/^[-*]\s+/.test(t)){
+      if (!inUl){ html += '<ul>'; inUl = true; }
+      html += '<li>' + inlineHtml(t.replace(/^[-*]\s+/,'')) + '</li>';
+      continue;
+    }
+    closeUl();
+    if (!t) continue;
+    if (/^#{1,3}\s+/.test(t)){ html += '<h4>' + inlineHtml(t.replace(/^#{1,3}\s+/,'')) + '</h4>'; continue; }
+    if (/^>\s?/.test(t)){ html += '<div class="quote">' + inlineHtml(t.replace(/^>\s?/,'')) + '</div>'; continue; }
+    html += '<p>' + inlineHtml(t) + '</p>';
+  }
+  closeUl();
+  return html || '<p>' + inlineHtml(raw) + '</p>';
+}
+function msgActs(kinds){
+  const icons = { copy: COPY_ICO, resend: RESEND_ICO, remove: X_ICO };
+  const titles = { copy:'复制内容', resend:'重新发送', remove:'删除这条记录' };
+  return '<div class="msg-acts">' + kinds.map(k =>
+    '<button data-act="' + k + '"' + (k === 'remove' ? ' class="danger"' : '') +
+    ' title="' + titles[k] + '" aria-label="' + titles[k] + '">' + icons[k] + '</button>').join('') + '</div>';
+}
+function whoLine(rec){
+  if (rec.dir === 'in'){
+    return '<div class="who"><b>取回文件</b><span class="dir in">接收</span><span class="time">' + fmtClock(new Date(rec.time)) + '</span></div>';
+  }
+  const kindTag = { text:'文本', post:'富文本', image:'图片', interactive:'交互卡片' }[rec.kind] || '';
+  return '<div class="who"><b>青鸟</b><span class="tag">' + esc(kindTag) + '</span>' +
+         '<span class="dir">发出</span><span class="time">' + fmtClock(new Date(rec.time)) + '</span></div>';
+}
+function botAv(){ return '<div class="av bot" aria-hidden="true">' + BIRD + '</div>'; }
+function personAv(){ return '<div class="av person" aria-hidden="true">取</div>'; }
+
+function bubbleHtml(rec){
+  const kind = rec.kind;
+  if (kind === 'text'){
+    return '<div class="bubble plain">' + renderTextHtml(rec.text || rec.summary) + '</div>';
+  }
+  if (kind === 'image'){
+    const names = rec.image_names || [];
+    const thumbs = rec.thumbs || [];
+    const tiles = names.map((n,i) => thumbs[i]
+      ? '<div class="thumb ' + TONES[i%3] + ' timg" style="background-image:url(' + thumbs[i] + ')"></div>'
+      : '<div class="thumb ' + TONES[i%3] + '"><span class="tn">' + esc(n) + '</span></div>').join('');
+    return '<div class="bubble"><div class="bub-head img">' + names.length + ' 张图片<span class="htype">图片 · image</span></div>' +
+      '<div class="img-grid' + (names.length === 1 ? ' one' : '') + '">' + tiles + '</div>' +
+      '<div class="bub-foot"><span class="ok">' + OK_ICO + '已发送 · ' + names.length + ' 张图</span><span>image_key 已换取</span></div></div>';
+  }
+  if (kind === 'interactive'){
+    return '<div class="bubble"><div class="bub-head card">交互卡片<span class="htype">interactive</span></div>' +
+      '<div class="card-msg"><div class="cm-desc">' + esc(rec.summary) + '</div></div>' +
+      '<div class="bub-foot"><span class="ok">' + OK_ICO + '已发送</span><span>' + esc(rec.status||'') + '</span></div></div>';
+  }
+  // post
+  let body = '<p>' + esc(rec.summary) + '</p>';
+  if (rec.payload && rec.payload.content && rec.payload.content.post){
+    try{
+      const post = rec.payload.content.post.zh_cn;
+      // image_key → 缩略图映射（附件图片按 imgKeys 顺序存于 rec.thumbs）
+      const keyThumb = {};
+      if (Array.isArray(rec.img_keys) && Array.isArray(rec.thumbs)){
+        rec.img_keys.forEach((k, i) => { if (k && rec.thumbs[i]) keyThumb[k] = rec.thumbs[i]; });
+      }
+      const lines = [];
+      for (const row of (post.content||[])){
+        let line = '';
+        for (const el of row){
+          if (el.tag === 'text') line += esc(el.text||'');
+          else if (el.tag === 'a') line += '<a href="#" onclick="return false">' + esc(el.text||el.href||'') + '</a>';
+          else if (el.tag === 'at') line += '<span class="at">@' + esc(el.user_name||'某人') + '</span>';
+          else if (el.tag === 'img'){
+            const t = keyThumb[el.image_key];
+            line += t ? '<img class="post-img" src="' + t + '" alt="图片">' : ' [图片]';
+          }
+        }
+        lines.push(line);
+      }
+      body = lines.map(l => l ? '<p>' + l + '</p>' : '').join('') || body;
+      if (post.title) body = '<h4>' + esc(post.title) + '</h4>' + body;
+    }catch(e){}
+  }
+  return '<div class="bubble"><div class="bub-head post">' + esc(rec.summary.slice(0,24) || '富文本') + '<span class="htype">富文本 · post</span></div>' +
+    '<div class="bub-body">' + body + '</div>' +
+    '<div class="bub-foot"><span class="' + (rec.ok ? 'ok' : 'st-err') + '">' + (rec.ok ? OK_ICO + '已发送' : WARN_ICO + '发送失败') + '</span><span>' + esc(rec.status||'') + '</span></div></div>';
+}
+function fileCardHtml(rec){
+  const dir = rec.dir || 'out';
+  const cls = 'filecard' + (dir === 'in' ? ' down' : '') +
+    (rec.state === 'done' || rec.state === 'downloaded' ? ' done' : '') +
+    (rec.state === 'failed' || rec.state === 'cancelled' ? ' fail' : '');
+  const pct = Math.round((rec.bytes_done || 0) * 100 / Math.max(1, rec.size || 1));
+  const running = rec.state === 'uploading' || rec.state === 'downloading';
+  let st;
+  if (rec.state === 'done' || rec.state === 'downloaded'){
+    st = '<span class="st">' + OK_ICO + (dir === 'in' ? '已解密并保存到下载目录' : '取回链接已发到 ' + esc(rec.bot_name || '群') + ' · 30 分钟内有效') + '</span>' +
+         '<span class="bacts">' + (dir === 'in' ? '<button data-open-dir>打开目录</button>' : '<button class="hi" data-copy-link>复制链接</button>') + '</span>';
+  } else if (rec.state === 'failed' || rec.state === 'cancelled'){
+    st = '<span class="st">' + WARN_ICO + esc(rec.error || (rec.state === 'cancelled' ? '已取消' : '传输失败')) + '</span>' +
+         '<span class="bacts"><button data-retry>重试</button></span>';
+  } else {
+    st = '<span class="st" data-st>' + (dir === 'in' ? '解密中，完成后直接存到「下载」目录' : '本机加密后上传，飞书侧只有密文') + '</span>' +
+         '<span class="bacts"><button data-cancel>取消</button></span>';
+  }
+  return '<div class="' + cls + '" data-rec-fp="' + esc(rec.fingerprint || '') + '">' +
+    '<div class="fc-main">' +
+      '<span class="fc-ico' + (dir === 'in' ? ' down' : '') + (rec.state === 'failed' || rec.state === 'cancelled' ? ' fail' : '') + '" aria-hidden="true">' + FILE_ICO + '</span>' +
+      '<div class="fc-info"><b title="' + esc(rec.name) + '">' + esc(rec.name) + '</b>' +
+        '<div class="fmeta"><span>' + fmtSize(rec.size) + '</span>' +
+        (running ? '<span class="live' + (dir === 'in' ? ' down' : '') + '" data-rate>' + (dir === 'in' ? '正在连接取回链接…' : '正在加密上传…') + '</span><span data-pct>' + pct + '%</span>' : '') +
+        '</div></div>' +
+      (running ? '<button class="fc-cancel" data-cancel title="取消传输" aria-label="取消传输">' + X_ICO + '</button>' : '') +
+    '</div>' +
+    '<div class="fc-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i style="width:' + pct + '%"></i></div>' +
+    '<div class="fc-bot">' + st + '</div>' +
+  '</div>';
+}
+function renderRecord(rec){
+  const art = document.createElement('article');
+  art.className = 'msg';
+  art.dataset.dir = rec.dir === 'in' ? 'in' : 'out';
+  let inner;
+  if (rec.kind === 'file'){
+    inner = (rec.dir === 'in' ? personAv() : botAv()) +
+      '<div class="col"><div class="stack">' + whoLine(rec) + fileCardHtml(rec) + '</div>' +
+      msgActs(['remove']) + '</div>';
+  } else {
+    const acts = ['copy', 'resend', 'remove'].filter(k => k !== 'resend' || rec.dir === 'out');
+    inner = botAv() + '<div class="col"><div class="stack">' + whoLine(rec) + bubbleHtml(rec) + '</div>' +
+      msgActs(acts) + '</div>';
+  }
+  art.innerHTML = inner;
+  art._rec = rec;
+  return art;
+}
+function renderStream(){
+  const stream = $('#stream');
+  stream.innerHTML = '';
+  let lastDay = null;
+  for (const rec of config.history){
+    const dk = dayKey(rec.time);
+    if (dk !== lastDay){
+      lastDay = dk;
+      const sep = document.createElement('div');
+      sep.className = 'daysep';
+      sep.textContent = dayLabel(rec.time);
+      stream.appendChild(sep);
+    }
+    stream.appendChild(renderRecord(rec));
+  }
+  refreshStats();
+  scrollToEnd(false);
+}
+function addRecord(rec){
+  config.history.push(rec);
+  if(config.history.length > 100) config.history.shift();
+  saveConfig();
+  // 增量插入
+  const stream = $('#stream');
+  const lastRec = config.history[config.history.length - 2];
+  if (!lastRec || dayKey(lastRec.time) !== dayKey(rec.time)){
+    const sep = document.createElement('div');
+    sep.className = 'daysep';
+    sep.textContent = dayLabel(rec.time);
+    stream.appendChild(sep);
+  }
+  const art = renderRecord(rec);
+  stream.appendChild(art);
+  refreshStats();
+  scrollToEnd();
+  return art;
+}
+function scrollToEnd(smooth = true){
+  const sc = $('#chatScroll');
+  requestAnimationFrame(() => { sc.scrollTo({top: sc.scrollHeight, behavior: smooth ? 'smooth' : 'auto'}); });
+}
+function refreshStats(){
+  const all = config.history;
+  const out = all.filter(m => (m.dir||'out') === 'out').length;
+  const inc = all.filter(m => m.dir === 'in').length;
+  $('#statUp').textContent = '发出 ' + out;
+  $('#statDown').textContent = '接收 ' + inc;
+  $('#chatEmpty').classList.toggle('show', all.length === 0);
+}
+
+/* ===================== 消息悬停操作 ===================== */
+$('#stream').addEventListener('click', async e => {
+  const actBtn = e.target.closest('.msg-acts button[data-act]');
+  if (actBtn){
+    const art = actBtn.closest('.msg');
+    const rec = art._rec;
+    const act = actBtn.dataset.act;
+    if (act === 'remove'){
+      const idx = config.history.indexOf(rec);
+      if (idx >= 0) config.history.splice(idx, 1);
+      saveConfig();
+      art.remove();
+      // 重绘日期分隔
+      renderStream();
+      toast('已删除这条记录');
+    } else if (act === 'copy'){
+      const body = $('.bub-body, .bubble.plain', art);
+      if (body && navigator.clipboard) navigator.clipboard.writeText(body.innerText).catch(() => {});
+      toast('已复制到剪贴板');
+    } else if (act === 'resend'){
+      if (rec.payload){
+        try{
+          const r = await sendWebhook(JSON.parse(JSON.stringify(rec.payload)));
+          rec.ok = r.ok; rec.status = r.msg; saveConfig(); renderStream();
+          toast(r.ok ? '已重新发送' : '重新发送失败', r.msg, r.ok ? '' : 'err');
+        }catch(e2){ toast('重新发送失败', String(e2), 'err'); }
+      }
+    }
     return;
   }
-  const typeMap = {text:'文本', post:'富文本', image:'图片', interactive:'交互卡片'};
-  for(const h of config.history.slice().reverse()){
-    const li = document.createElement('li');
-    li.className = h.ok ? 'ok' : 'err';
-    li.innerHTML = '<span class="rail"></span><div>'
-      + '<div class="head"><span class="time">'+esc(h.time)+'</span>'
-      + '<span class="kind '+(h.msg_type==='interactive'?'card':h.msg_type)+'">'+esc(typeMap[h.msg_type]||h.msg_type)+'</span></div>'
-      + '<div class="preview">'+esc(h.summary||'')+'</div>'
-      + '<div class="status">'+(h.ok?'✓ ':'✗ ')+esc(h.status||'')+'</div></div>';
-    historyUl.appendChild(li);
+  // filecard 内按钮
+  const copyBtn = e.target.closest('[data-copy-link]');
+  if (copyBtn){
+    const rec = copyBtn.closest('.msg')?._rec;
+    const link = rec && rec.link;
+    if (link && navigator.clipboard) navigator.clipboard.writeText(link).catch(() => {});
+    copyBtn.textContent = '已复制';
+    setTimeout(() => { copyBtn.textContent = '复制链接'; }, 1600);
+    toast('取回链接已复制');
+    return;
   }
-}
-async function addHistory(h){
-  config.history.push(h);
-  if(config.history.length > 50) config.history.shift();
-  await saveConfig();
-  renderHistory();
-}
-$('.history header button')?.addEventListener('click', async () => {
-  if(!config.history.length) return;
+  if (e.target.closest('[data-open-dir]')){
+    if (invoke){ invoke('open_download_dir').catch(err => toast('打开目录失败', String(err), 'err')); }
+    return;
+  }
+  const retryBtn = e.target.closest('[data-retry]');
+  if (retryBtn){ pickFile(); return; }
+  const cancelBtn = e.target.closest('[data-cancel]');
+  if (cancelBtn){
+    const art = cancelBtn.closest('.msg');
+    const rec = art && art._rec;
+    if (rec && rec.task_id && invoke){
+      invoke('transfer_cancel', {taskId: rec.task_id}).catch(() => {});
+    }
+    return;
+  }
+});
+
+/* ===================== 清空记录 ===================== */
+const clearBtn = $('#clearBtn');
+let clearTimer = null;
+clearBtn.addEventListener('click', () => {
+  if (!clearBtn.classList.contains('confirming')){
+    clearBtn.classList.add('confirming');
+    clearBtn.innerHTML = clearBtn.innerHTML.replace('清空记录', '再点一次确认');
+    clearTimer = setTimeout(resetClear, 4000);
+    return;
+  }
+  resetClear();
   config.history = [];
-  await saveConfig();
-  renderHistory();
-  setResult(null, '已清空发送历史');
+  saveConfig();
+  renderStream();
+  toast('消息记录已清空');
 });
+function resetClear(){
+  clearTimeout(clearTimer);
+  clearBtn.classList.remove('confirming');
+  clearBtn.innerHTML = clearBtn.innerHTML.replace('再点一次确认', '清空记录');
+}
 
-/* ===================== 附件 ===================== */
-function renderAttachments(){
-  $$('.att', attStrip).forEach(el => el.remove());
-  const addBtn = $('.att-add', attStrip);
-  for(const att of attachments){
-    const div = document.createElement('div');
-    div.className = 'att' + (att.status === 'uploading' ? ' uploading' : '') + (att.status === 'error' ? ' missing' : '');
-    div.style.backgroundImage = 'url('+att.dataUrl+')';
-    div.dataset.id = att.id;
-    let stateHtml = '';
-    if(att.status === 'uploading') stateHtml = '<span class="state"><span class="sd"></span>上传中…</span>';
-    else if(att.status === 'done') stateHtml = '<span class="state"><span class="sd"></span>'+esc((att.imageKey||'').slice(0,12)+'…')+'</span>';
-    else if(att.status === 'error'){
-      const errMsg = (att.error || '上传失败').slice(0, 36);
-      stateHtml = '<span class="state" title="'+esc(att.error||'')+'"><span class="sd"></span>'+esc(errMsg)+'</span>';
-    }
-    else stateHtml = '<span class="state"><span class="sd"></span>待上传</span>';
-    div.innerHTML = '<span class="badge">'+esc(att.name)+'</span>'+stateHtml+'<button class="rm" aria-label="移除附件">×</button>';
-    div.addEventListener('click', (e) => {
-      if(e.target.closest('.rm')) return;
-      if(att.status === 'error' || att.status === 'manual' || !att.imageKey){
-        const key = prompt('请输入 image_key：', att.imageKey || '');
-        if(key){ att.imageKey = key.trim(); att.status = 'done'; renderAttachments(); refreshIntent(); }
-      }
-    });
-    attStrip.insertBefore(div, addBtn);
-  }
-  attStrip.style.display = attachments.length ? '' : 'none';
-}
-function addAttachment(file, dataUrl){
-  const att = {id: uid(), name: file.name || 'pasted.png', dataUrl, imageKey:'', status:'uploading', error:''};
-  attachments.push(att);
-  renderAttachments(); refreshIntent();
-  log('info', '附件已添加: ' + att.name + ' (' + Math.round((file.size||0)/1024) + ' KB, dataUrl ' + Math.round(dataUrl.length/1024) + ' KB)');
-  uploadAttachment(att);
-}
-function removeAttachment(id){
-  attachments = attachments.filter(a => a.id !== id);
-  renderAttachments(); refreshIntent();
-}
-async function uploadAttachment(att){
-  if(invoke && config.app_id && config.app_secret){
-    log('info', 'uploadAttachment: 开始上传 ' + att.name);
-    try{
-      const base64 = att.dataUrl.split(',')[1];
-      const key = await invoke('upload_image', {
-        imageBase64: base64, filename: att.name,
-        appId: config.app_id, appSecret: config.app_secret
+/* ===================== 文件传输：选择 / 确认 / 上传 ===================== */
+function pickFile(){
+  closeAddMenu();
+  if (invoke){
+    invoke('plugin:dialog|open', {options: {multiple: false, title: '选择要发送的文件'}})
+      .then(path => { if (path) handleFile({path, name: String(path).split('/').pop().split('\\').pop(), size: 0}); })
+      .catch(e => {
+        log('warn', '文件选择器不可用: ' + (e.message || e));
+        toast('文件选择器不可用', '请使用拖拽方式添加文件', 'err');
       });
-      att.imageKey = key; att.status = 'done';
-      log('info', 'uploadAttachment: 上传成功 ' + att.name + ' → ' + key);
-    }catch(e){
-      att.status = 'error'; att.error = e.message;
-      log('error', 'uploadAttachment: 上传失败 ' + att.name + ' → ' + (e.message || e));
-    }
   } else {
-    // 无 Tauri 或未配置应用凭证：降级为手动填 key
-    await new Promise(r => setTimeout(r, 800));
-    att.status = 'error';
-    att.error = '未配置飞书应用凭证';
-    log('warn', 'uploadAttachment: ' + att.name + ' 未配置飞书应用凭证，降级为手动填写 image_key');
+    toast('浏览器降级模式', '文件传输需要 Tauri 环境', 'err');
   }
-  renderAttachments(); refreshIntent();
 }
-attStrip.addEventListener('click', (e) => {
-  const rm = e.target.closest('.rm');
-  if(rm){ const id = rm.closest('.att').dataset.id; removeAttachment(id); }
-});
-editor.addEventListener('paste', (e) => {
-  const items = e.clipboardData && e.clipboardData.items;
-  if(!items) return;
-  for(const it of items){
-    if(it.type && it.type.startsWith('image/')){
-      e.preventDefault();
-      const f = it.getAsFile();
-      const r = new FileReader();
-      r.onload = ev => addAttachment(f, ev.target.result);
-      r.readAsDataURL(f);
-    }
+function handleFile(file){
+  pendingFile = file;
+  $('#confirmTarget').textContent = (config.webhooks[config.last_webhook] || {}).name || '-';
+  $('#confirmName').textContent = file.name;
+  $('#confirmName').title = file.name;
+  const big = file.size > 100 * 1048576;
+  $('#confirmMeta').textContent = (file.size ? fmtSize(file.size) + ' · ' : '') + (big ? '超出单文件上限 100 MB' : '加密后单独发一条记录');
+  $('#confirmIconShape').innerHTML = big
+    ? '<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/>'
+    : '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/>';
+  $('#confirmSend').disabled = big;
+  $('#confirmSend').style.opacity = big ? '0.5' : '';
+  $('#confirmSend').textContent = big ? '无法发送' : '发送';
+  $('#confirmOverlay').classList.add('show');
+}
+function closeConfirm(){ $('#confirmOverlay').classList.remove('show'); }
+$('#confirmSend').addEventListener('click', async () => {
+  if ($('#confirmSend').disabled) return;
+  const f = pendingFile;
+  closeConfirm();
+  if (!f || !invoke){ toast('Tauri 环境不可用', '', 'err'); return; }
+  const rec = {
+    time: nowIso(), kind: 'file', dir: 'out',
+    name: f.name, size: f.size || 0,
+    state: 'uploading', bytes_done: 0,
+    bot_name: (config.webhooks[config.last_webhook] || {}).name
+  };
+  const art = addRecord(rec);
+  const card = $('.filecard', art);
+  const bot = config.webhooks[config.last_webhook];
+  try{
+    const res = await invoke('transfer_start_upload', {
+      path: f.path,
+      webhookUrl: bot ? bot.url : '',
+      webhookSecret: bot && bot.secret ? bot.secret : ''
+    });
+    rec.task_id = res.task_id;
+    if (res.size) rec.size = res.size;
+    liveTasks.set(res.task_id, {record: rec, el: card});
+    saveConfig();
+    // 补偿：终态事件可能早于本次注册已发出（小文件上传极快）
+    setTimeout(() => pollFinalState(res.task_id), 300);
+  }catch(e){
+    rec.state = 'failed';
+    rec.error = String(e && e.message || e).slice(0, 120);
+    saveConfig(); renderStream();
+    toast('无法开始传输', rec.error, 'err');
   }
 });
-$('.att-add', attStrip)?.addEventListener('click', () => {
-  const inp = document.createElement('input');
-  inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
-  inp.onchange = () => {
-    for(const f of inp.files){
-      const r = new FileReader();
-      r.onload = ev => addAttachment(f, ev.target.result);
-      r.readAsDataURL(f);
+function findCardEl(rec){
+  for (const art of $$('#stream .msg')){
+    if (art._rec === rec) return $('.filecard', art);
+  }
+  return null;
+}
+$('#confirmCancel').addEventListener('click', closeConfirm);
+$('#confirmClose').addEventListener('click', closeConfirm);
+$('#confirmOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeConfirm(); });
+
+/* 传输进度事件（监听 + 注册后轮询补偿，防终态事件早于注册到达） */
+function applyProgress(p){
+  const t = liveTasks.get(p.task_id);
+  if (!t) return;
+  const {record: rec} = t;
+  if (p.bytes_done !== undefined) rec.bytes_done = p.bytes_done;
+  if (p.bytes_total) rec.size = p.bytes_total;
+  if (p.state === 'running'){
+    const pct = Math.round((rec.bytes_done||0) * 100 / Math.max(1, rec.size||1));
+    const card = findCardEl(rec);
+    if (card){
+      $('.fc-bar', card).setAttribute('aria-valuenow', String(pct));
+      $('.fc-bar i', card).style.width = pct + '%';
+      const rate = $('[data-rate]', card), pctEl = $('[data-pct]', card);
+      if (pctEl) pctEl.textContent = pct + '%';
+      if (rate && p.rate_bps) rate.textContent = (rec.dir === 'in' ? '下载中 ' : '正在上传 ') + (p.rate_bps/1048576).toFixed(1) + ' MB/s';
     }
-  };
+  } else if (p.state === 'done'){
+    rec.state = rec.dir === 'in' ? 'downloaded' : 'done';
+    rec.bytes_done = rec.size;
+    if (p.link) rec.link = p.link;
+    if (p.final_path) rec.final_path = p.final_path;
+    liveTasks.delete(p.task_id);
+    saveConfig(); renderStream();
+    if (rec.dir === 'out') toast('文件已发出', '取回链接已发到 ' + (rec.bot_name || '群'));
+    else toast('文件已保存', rec.name);
+  } else if (p.state === 'failed' || p.state === 'cancelled'){
+    rec.state = p.state;
+    rec.error = (p.error || (p.state === 'cancelled' ? '已取消' : '传输失败')).slice(0, 120);
+    liveTasks.delete(p.task_id);
+    saveConfig(); renderStream();
+    if (p.state === 'failed') toast('传输失败', rec.error, 'err');
+  }
+}
+listenEvent('transfer://progress', ev => applyProgress(ev.payload || {}));
+/* 浏览器取回（点聊天里的链接）完成 → 补写历史记录；应用内取回已有记录，去重跳过 */
+listenEvent('transfer://downloaded', ev => {
+  const p = ev.payload || {};
+  if (liveTasks.has(p.task_id)) return;
+  if (p.fingerprint && config.history.some(r => r.fingerprint === p.fingerprint && ['downloading','downloaded'].includes(r.state))) return;
+  addRecord({
+    time: nowIso(), kind: 'file', dir: 'in',
+    name: p.name || '', size: p.size || 0,
+    state: 'downloaded', bytes_done: p.size || 0,
+    final_path: p.final_path || '',
+    fingerprint: p.fingerprint || ''
+  });
+  toast('文件已保存', p.name || '');
+});
+async function pollFinalState(taskId){
+  if (!invoke) return;
+  try{
+    const p = await invoke('transfer_task_state', {taskId});
+    if (p) applyProgress(p);
+  }catch(e){}
+}
+
+/* ===================== 取回链接 ===================== */
+const retrieveBtn = $('#retrieveBtn'), retrievePop = $('#retrievePop');
+retrieveBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  const show = !retrievePop.classList.contains('show');
+  retrievePop.classList.toggle('show', show);
+  retrieveBtn.setAttribute('aria-expanded', String(show));
+  if (show) $('#retrieveInput').focus();
+});
+retrievePop.addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', () => {
+  retrievePop.classList.remove('show');
+  retrieveBtn.setAttribute('aria-expanded', 'false');
+  closeAddMenu();
+  toggleBotMenu(false);
+});
+function parseRetrieve(){
+  const v = ($('#retrieveInput').value || '').trim();
+  const hint = $('#retrieveHint');
+  hint.classList.remove('bad');
+  if (!v){
+    hint.classList.add('bad');
+    hint.textContent = '请先粘贴群里的取回链接，或链接 t= 后面那段载荷。';
+    return;
+  }
+  if (!/^https?:\/\/127\.0\.0\.1:\d+\/dl\?t=.+/.test(v) && !/^[A-Za-z0-9_-]{24,}$/.test(v)){
+    hint.classList.add('bad');
+    hint.textContent = '这不像青鸟的取回链接：应形如 http://127.0.0.1:9876/dl?t=… ，或直接是 t= 后面那段载荷。';
+    return;
+  }
+  if (!invoke){ hint.classList.add('bad'); hint.textContent = 'Tauri 环境不可用。'; return; }
+  invoke('transfer_parse_payload', {input: v}).then(meta => {
+    hint.textContent = '链接有效，已开始下载，进度会出现在下方记录里。';
+    const rec = {
+      time: nowIso(), kind: 'file', dir: 'in',
+      name: meta.name, size: meta.size || 0,
+      state: 'downloading', bytes_done: 0,
+      fingerprint: meta.fingerprint
+    };
+    const art = addRecord(rec);
+    const card = $('.filecard', art);
+    return invoke('transfer_confirm_download', {sessionId: meta.session_id}).then(res => {
+      if (res.already_done){
+        // 幂等：该文件已取回过（§9.4 已消费缓存）
+        rec.state = 'downloaded';
+        rec.final_path = res.final_path || '';
+        rec.bytes_done = rec.size;
+        saveConfig(); renderStream();
+        toast('该文件已取回过', '不会重复下载');
+        return;
+      }
+      rec.task_id = res.task_id;
+      liveTasks.set(res.task_id, {record: rec, el: card});
+      saveConfig();
+      // 补偿：终态事件可能早于本次注册已发出
+      setTimeout(() => pollFinalState(res.task_id), 300);
+    });
+  }).catch(e => {
+    hint.classList.add('bad');
+    hint.textContent = String(e && e.message || e).slice(0, 120);
+  });
+}
+$('#retrieveGo').addEventListener('click', parseRetrieve);
+$('#retrieveInput').addEventListener('keydown', e => { if (e.key === 'Enter') parseRetrieve(); });
+
+/* ===================== 添加菜单 / 拖拽 ===================== */
+const addMenu = $('#addMenu'), addBtn = $('#btnAdd');
+function closeAddMenu(){
+  addMenu.classList.remove('show');
+  addBtn.setAttribute('aria-expanded', 'false');
+}
+addBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  const show = !addMenu.classList.contains('show');
+  addMenu.classList.toggle('show', show);
+  addBtn.setAttribute('aria-expanded', String(show));
+});
+addMenu.addEventListener('click', e => e.stopPropagation());
+$('#addImage').addEventListener('click', pickImages);
+$('#addFile').addEventListener('click', pickFile);
+
+let imgArmed = false;
+function pickImages(){
+  closeAddMenu();
+  imgArmed = true;
+  const inp = $('#imgPicker');
+  inp.value = '';
   inp.click();
+}
+$('#imgPicker').addEventListener('change', function(){
+  if (!imgArmed) return;
+  imgArmed = false;
+  const el = activeEd();
+  Array.prototype.forEach.call(this.files, f => {
+    const rd = new FileReader();
+    rd.onload = ev => insertChip(el, f.name, ev.target.result);
+    rd.readAsDataURL(f);
+  });
 });
 
-/* ===================== 机器人选择 & 管理 ===================== */
+$('#btnEmoji').addEventListener('click', () => insertNode(activeEd(), document.createTextNode('🙂')));
+$('#btnAt').addEventListener('click', () => insertNode(activeEd(), document.createTextNode('@所有人')));
+$('#btnSend').addEventListener('click', send);
+$('#expandSend').addEventListener('click', send);
+
+/* 拖拽 */
+const dropzone = $('#dropzone');
+function showDrop(on){
+  dropzone.classList.toggle('show', on);
+  dropzone.setAttribute('aria-hidden', String(!on));
+}
+function handleDroppedPaths(paths){
+  const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+  for (const p of (paths || [])){
+    const name = String(p).split('/').pop().split('\\').pop();
+    if (IMG_EXT.test(name)){
+      if (invoke){
+        invoke('read_file_base64', {path: p}).then(b64 => {
+          insertChip(activeEd(), name, 'data:image;base64,' + b64);
+        }).catch(e => toast('读取图片失败', String(e).slice(0,80), 'err'));
+      }
+    } else {
+      handleFile({path: p, name, size: 0});
+      break; // 一次只处理一个文件，与单文件上限口径一致
+    }
+  }
+}
+if (TAURI && TAURI.webview && TAURI.webview.getCurrentWebview){
+  try{
+    TAURI.webview.getCurrentWebview().onDragDropEvent(ev => {
+      const p = ev.payload || {};
+      if (p.type === 'enter' || p.type === 'over') showDrop(true);
+      else if (p.type === 'drop'){ showDrop(false); handleDroppedPaths(p.paths); }
+      else showDrop(false);
+    });
+  }catch(e){ console.error('拖拽初始化失败', e); }
+}
+
+/* ===================== 放大编辑 ===================== */
+const expand = $('#expand');
+function openExpand(){
+  expEd.innerHTML = ed.innerHTML;
+  syncEmpty(expEd);
+  $('#expandTitle').value = '';
+  $('#expandFrom').textContent = isBlank(ed)
+    ? '输入框还是空的 · 收起时会带回去'
+    : '已带入输入框里的内容 · 收起时会带回去';
+  expand.classList.add('show');
+  refresh();
+  setTimeout(() => { expEd.focus(); placeCaretEnd(expEd); }, 60);
+}
+function closeExpand(){
+  ed.innerHTML = expEd.innerHTML;
+  syncEmpty(ed);
+  expand.classList.remove('show');
+  refresh();
+  setTimeout(() => { ed.focus(); placeCaretEnd(ed); }, 40);
+}
+function placeCaretEnd(el){
+  if (isBlank(el)) return;
+  const r = document.createRange();
+  r.selectNodeContents(el); r.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(r);
+  RANGES.set(el, r.cloneRange());
+}
+$('#btnExpand').addEventListener('click', openExpand);
+$('#expandClose').addEventListener('click', closeExpand);
+expand.addEventListener('click', e => { if (e.target === expand) closeExpand(); });
+
+/* 展开编辑工具栏：以 Markdown 文本方式插入（发送链路吃 markdown） */
+function insertMarkdown(wrapBefore, wrapAfter, prefix){
+  const el = expEd;
+  const sel = window.getSelection();
+  const hasSel = sel && sel.rangeCount && el.contains(sel.getRangeAt(0).commonAncestorContainer) && !sel.isCollapsed;
+  if (hasSel){
+    const r = sel.getRangeAt(0);
+    const frag = r.extractContents();
+    const tmp = document.createElement('div');
+    tmp.appendChild(frag);
+    const text = tmp.innerText;
+    insertNode(el, document.createTextNode(prefix ? '' : wrapBefore + text + (wrapAfter || '')));
+  }
+  if (prefix){
+    // 行首前缀：在光标处插入换行 + 前缀
+    insertNode(el, document.createTextNode('\n' + prefix + ' '));
+  } else if (!hasSel){
+    insertNode(el, document.createTextNode(wrapBefore + (wrapAfter || '')));
+  }
+  syncEmpty(el); refresh();
+}
+$$('.expand-bar .ebtn').forEach(b => {
+  b.addEventListener('click', () => {
+    expEd.focus();
+    const md = b.dataset.md;
+    if (md === 'bold') insertMarkdown('**', '**');
+    else if (md === 'italic') insertMarkdown('*', '*');
+    else if (md === 'strike') insertMarkdown('~~', '~~');
+    else if (md === 'ul') insertMarkdown(null, null, '-');
+    else if (md === 'ol') insertMarkdown(null, null, '1.');
+    else if (md === 'quote') insertMarkdown(null, null, '>');
+    else if (md === 'code') insertMarkdown('`', '`');
+    else if (md === 'link') insertMarkdown('[', '](https://)');
+    syncEmpty(expEd); refresh();
+  });
+});
+$('#expandAddImage').addEventListener('click', pickImages);
+$('#expandAddFile').addEventListener('click', pickFile);
+
+/* ===================== 机器人下拉 & 管理 ===================== */
+const botPickerBtn = $('#botPickerBtn'), botMenu = $('#botMenu');
+function toggleBotMenu(force){
+  const show = typeof force === 'boolean' ? force : !botMenu.classList.contains('show');
+  botMenu.classList.toggle('show', show);
+  botPickerBtn.setAttribute('aria-expanded', String(show));
+}
+botPickerBtn.addEventListener('click', e => { e.stopPropagation(); toggleBotMenu(); });
+botMenu.addEventListener('click', e => e.stopPropagation());
+
 function renderBotMenu(){
-  const menu = $('#botMenu');
-  $$('.bot-item', menu).forEach(el => el.remove());
-  const actionBtn = $('#menuGoManage');
+  $$('.bot-item', botMenu).forEach(el => el.remove());
+  const divider = $('.bot-menu-divider', botMenu);
   config.webhooks.forEach((bot, idx) => {
     const btn = document.createElement('button');
     btn.className = 'bot-item' + (idx === config.last_webhook ? ' active' : '');
-    btn.dataset.name = bot.name;
-    btn.dataset.hint = bot.secret ? '已设置签名' : '未设置签名';
     btn.setAttribute('role','menuitemradio');
     btn.setAttribute('aria-checked', String(idx === config.last_webhook));
     const shortUrl = (bot.url||'').replace('https://open.feishu.cn/open-apis/bot/v2/hook/','open.feishu.cn/…/');
     btn.innerHTML = '<span class="bdot'+(bot.secret?'':' muted')+'" aria-hidden="true"></span>'
       + '<div class="binfo"><b>'+esc(bot.name)+'</b><span>'+esc(shortUrl)+'</span></div>'
       + '<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
-    btn.addEventListener('click', async () => {
-      config.last_webhook = idx; await saveConfig();
+    btn.addEventListener('click', () => {
+      config.last_webhook = idx; saveConfig();
       renderBotMenu(); updateBotPicker(); toggleBotMenu(false);
     });
-    menu.insertBefore(btn, actionBtn);
+    botMenu.insertBefore(btn, divider);
   });
-  const title = $('.bot-menu-title', menu);
-  if(title) title.textContent = '发送目标 · '+config.webhooks.length+' 个机器人';
+  const title = $('.bot-menu-title', botMenu);
+  if (title) title.textContent = '发送目标 · ' + config.webhooks.length + ' 个机器人';
 }
 function updateBotPicker(){
   const bot = config.webhooks[config.last_webhook];
   $('#currentBotName').textContent = bot ? bot.name : '未设置';
   $('#currentBotHint').textContent = bot ? (bot.secret ? '已设置签名' : '未设置签名') : '';
+  updateBotLabels();
 }
 function renderBotList(){
   const list = $('#botList');
@@ -499,7 +1192,6 @@ function renderBotList(){
   config.webhooks.forEach((bot, idx) => {
     const item = document.createElement('div');
     item.className = 'bot-list-item';
-    item.dataset.bot = bot.name;
     item.dataset.idx = idx;
     const shortUrl = (bot.url||'').replace('https://open.feishu.cn/open-apis/bot/v2/hook/','open.feishu.cn/…/');
     item.innerHTML =
@@ -515,11 +1207,11 @@ function renderBotList(){
         + '<input type="text" value="'+esc(bot.secret||'')+'" placeholder="签名密钥（留空则不带签名）" />'
         + '<input type="text" class="full" value="'+esc(bot.url||'')+'" placeholder="Webhook 地址" />'
         + '</div><div class="edit-actions">'
-        + '<span class="edit-hint">修改会立即生效</span>'
+        + '<span class="edit-hint">修改会立即生效，不影响已发送的历史消息</span>'
         + '<button data-action="cancel-edit">取消</button>'
         + '<button class="primary" data-action="save-edit">保存修改</button></div></div>'
       + '<div class="bot-list-confirm">'
-        + '<span class="msg">确认删除 <b>'+esc(bot.name)+'</b>？</span>'
+        + '<span class="msg">确认删除 <b>'+esc(bot.name)+'</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>'
         + '<button data-action="cancel-delete">取消</button>'
         + '<button class="danger" data-action="confirm-delete">确认删除</button></div>';
     list.appendChild(item);
@@ -527,12 +1219,11 @@ function renderBotList(){
   refreshBotCount();
 }
 function refreshBotCount(){
-  const footerLeft = $('#manageOverlay footer .left');
-  if(footerLeft) footerLeft.textContent = '共 '+config.webhooks.length+' 个机器人';
+  $('#botCountLabel').textContent = '共 ' + config.webhooks.length + ' 个机器人';
   const title = $('#botMenu .bot-menu-title');
-  if(title) title.textContent = '发送目标 · '+config.webhooks.length+' 个机器人';
+  if (title) title.textContent = '发送目标 · ' + config.webhooks.length + ' 个机器人';
 }
-$('#botList').addEventListener('click', async (e) => {
+$('#botList').addEventListener('click', e => {
   const btn = e.target.closest('[data-action]');
   if(!btn) return;
   const item = btn.closest('.bot-list-item');
@@ -546,7 +1237,7 @@ $('#botList').addEventListener('click', async (e) => {
   } else if(action === 'save-edit'){
     const inputs = item.querySelectorAll('.bot-list-edit .edit-grid input');
     config.webhooks[idx] = {name: inputs[0].value.trim() || '未命名', secret: inputs[1].value.trim(), url: inputs[2].value.trim()};
-    await saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
+    saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
   } else if(action === 'cancel-edit'){ item.classList.remove('editing'); }
   else if(action === 'delete'){
     $$('.bot-list-item').forEach(x => { if(x !== item) x.classList.remove('editing','confirming-delete'); });
@@ -555,56 +1246,38 @@ $('#botList').addEventListener('click', async (e) => {
   else if(action === 'confirm-delete'){
     config.webhooks.splice(idx, 1);
     if(config.last_webhook >= config.webhooks.length) config.last_webhook = Math.max(0, config.webhooks.length-1);
-    await saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
+    saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
   }
 });
-document.querySelector('.add-bot-form .btn-primary')?.addEventListener('click', async () => {
-  const inputs = $$('.add-bot-form input');
-  const name = inputs[0].value.trim(), secret = inputs[1].value.trim(), url = inputs[2].value.trim();
-  const errEl = document.getElementById('addBotError');
+$('#addBotBtn').addEventListener('click', () => {
+  const name = $('#addBotName').value.trim(), secret = $('#addBotSecret').value.trim(), url = $('#addBotUrl').value.trim();
+  const errEl = $('#addBotError');
   if(!name || !url){
-    if(errEl){ errEl.textContent = '请填写名称和 Webhook 地址'; errEl.style.minHeight = '16px'; }
-    setTimeout(() => { if(errEl){ errEl.textContent = ''; errEl.style.minHeight = '0'; } }, 3000);
+    errEl.textContent = '请填写名称和 Webhook 地址';
+    errEl.style.color = 'var(--danger)';
+    setTimeout(() => { errEl.textContent = '签名密钥用于自动计算 sign，留空则不带签名'; errEl.style.color = ''; }, 3000);
     return;
   }
-  if(errEl){ errEl.textContent = ''; errEl.style.minHeight = '0'; }
   config.webhooks.push({name, secret, url});
-  await saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
-  inputs.forEach(i => i.value = '');
+  saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
+  $('#addBotName').value = ''; $('#addBotSecret').value = ''; $('#addBotUrl').value = '';
 });
 
-/* ===================== 弹窗控制 ===================== */
+/* ===================== 弹窗通用 ===================== */
 const configOverlay = $('#configOverlay');
 const manageOverlay = $('#manageOverlay');
-function openModal(el){ el.classList.add('show'); }
-function closeModal(el){ el.classList.remove('show'); }
-$('#openConfig').addEventListener('click', () => { loadConfigForm(); openModal(configOverlay); });
-$('#closeConfig').addEventListener('click', () => closeModal(configOverlay));
-$('#cancelConfig').addEventListener('click', () => closeModal(configOverlay));
-$('#saveConfig').addEventListener('click', async () => { await saveConfigForm(); closeModal(configOverlay); });
-configOverlay.addEventListener('click', e => { if(e.target === configOverlay) closeModal(configOverlay); });
+$$('.overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); }));
 
-$('#openManage').addEventListener('click', () => { renderBotList(); openModal(manageOverlay); });
-$('#menuGoManage').addEventListener('click', () => { toggleBotMenu(false); renderBotList(); openModal(manageOverlay); });
-$('#closeManage').addEventListener('click', () => closeModal(manageOverlay));
-$('#closeManageFooter').addEventListener('click', () => closeModal(manageOverlay));
-manageOverlay.addEventListener('click', e => { if(e.target === manageOverlay) closeModal(manageOverlay); });
+$('#openConfig').addEventListener('click', () => { loadConfigForm(); configOverlay.classList.add('show'); });
+$('#closeConfig').addEventListener('click', () => configOverlay.classList.remove('show'));
+$('#cancelConfig').addEventListener('click', () => configOverlay.classList.remove('show'));
+$('#saveConfig').addEventListener('click', async () => { await saveConfigForm(); configOverlay.classList.remove('show'); });
 
-document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closeModal(configOverlay); closeModal(manageOverlay); } });
+$('#menuGoManage').addEventListener('click', () => { toggleBotMenu(false); renderBotList(); manageOverlay.classList.add('show'); });
+$('#closeManage').addEventListener('click', () => manageOverlay.classList.remove('show'));
+$('#closeManageFooter').addEventListener('click', () => manageOverlay.classList.remove('show'));
 
-const botPickerBtn = $('#botPickerBtn');
-const botMenu = $('#botMenu');
-function toggleBotMenu(force){
-  const show = typeof force === 'boolean' ? force : !botMenu.classList.contains('show');
-  botMenu.classList.toggle('show', show);
-  botPickerBtn.setAttribute('aria-expanded', String(show));
-}
-botPickerBtn.addEventListener('click', e => { e.stopPropagation(); toggleBotMenu(); });
-document.addEventListener('click', e => {
-  if(!botMenu.contains(e.target) && e.target !== botPickerBtn) toggleBotMenu(false);
-});
-
-const tabToPane = {app:'paneApp', pref:'panePref', about:'paneAbout'};
+const tabToPane = {app:'paneApp', agent:'paneAgent', transfer:'paneTransfer', pref:'panePref', about:'paneAbout'};
 $$('#configOverlay .nav button').forEach(b => {
   b.addEventListener('click', () => {
     $$('#configOverlay .nav button').forEach(x => x.classList.remove('active'));
@@ -621,39 +1294,39 @@ $('#toggleSecret')?.addEventListener('click', () => {
   $('#toggleSecret').textContent = showing ? '显示' : '隐藏';
 });
 
-/* ---- 打开外部链接 ---- */
-async function openExternal(url){
-  if(invoke){
-    try{
-      await invoke('plugin:opener|open_url', { url });
-      return;
-    }catch(e){
-      console.error('打开链接失败:', e);
-      log('error', '打开外部链接失败: ' + (e.message || e));
-    }
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (expand.classList.contains('show')){ closeExpand(); return; }
+  if (retrievePop.classList.contains('show')){
+    retrievePop.classList.remove('show'); retrieveBtn.setAttribute('aria-expanded','false'); return;
   }
-  window.open(url, '_blank', 'noopener');
-}
-$('#howToCredsLink')?.addEventListener('click', e => {
-  e.preventDefault();
-  openExternal('https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-app-id');
-});
-$('#openFeishuPlatform')?.addEventListener('click', () => {
-  openExternal('https://open.feishu.cn/app');
+  closeAddMenu();
+  $$('.overlay').forEach(o => o.classList.remove('show'));
 });
 
-/* ---- 测试连接 ---- */
-const connCard    = $('#connCard');
-const connIcon    = $('#connIcon');
-const connHeadTxt = $('#connHeadTxt');
-const connTime    = $('#connTime');
-const connGrid    = $('#connGrid');
-const permUpload       = $('#permUpload');
-const permUploadStatus = $('#permUploadStatus');
-const connPermHint     = $('#connPermHint');
-const applyPermBtn     = $('#applyPermBtn');
-const testConnBtn = $('#testConnBtn');
-const testConnLabel = $('#testConnLabel');
+/* ===================== 配置 · 飞书应用 pane ===================== */
+const connCard = $('#connCard'), connIcon = $('#connIcon'), connHeadTxt = $('#connHeadTxt'),
+      connTime = $('#connTime'), connGrid = $('#connGrid'), readyBadge = $('#readyBadge'),
+      connPermHint = $('#connPermHint'),
+      testConnBtn = $('#testConnBtn'), testConnLabel = $('#testConnLabel');
+const WARN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+// 探测型权限元信息：key → 徽标元素、开通/未开通文案、缺失时的警告块文案
+const PERM_META = {
+  upload: {
+    badge: $('#permUploadBadge'), okText: '已开通', missText: '未开通',
+    title: '缺少图片上传权限',
+    desc: '上传图片需要 <code>im:resource:upload</code> 权限。点击下方按钮前往飞书开放平台申请，申请后必须发布新版本才会生效。',
+    btn: '申请 im:resource:upload 权限',
+    ok: null, applyUrl: '',
+  },
+  drive: {
+    badge: $('#permDriveBadge'), okText: '已开通', missText: '未开通',
+    title: '缺少云空间权限',
+    desc: '两端机器无法直连时，青鸟需要用飞书云空间中转文件。缺 <code>drive:drive</code> 权限的这段时间，只有同一网络内的机器能互传。申请后必须发布新版本才会生效。',
+    btn: '申请 drive:drive 权限',
+    ok: null, applyUrl: '',
+  },
+};
 const CONN_ICON_OK   = '<path d="M20 6L9 17l-5-5"/>';
 const CONN_ICON_IDLE = '<path d="M5 12h14"/>';
 const CONN_ICON_ERR  = '<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>';
@@ -664,29 +1337,57 @@ function setConnCard(state, text, time){
   connHeadTxt.textContent = text;
   connTime.textContent = time || '';
   connGrid.hidden = state !== 'ok';
-  if(state !== 'ok'){ resetUploadPerm(); }
+  if(state !== 'ok'){ resetPerms(); }
+  refreshReadyBadge();
 }
-function resetConnCard(){
-  setConnCard('idle', '未连接 · 填写凭证后点击「测试连接」');
+function setPermStatus(key, state){ // state: 'pending' | 'ok' | 'miss'
+  const m = PERM_META[key]; if(!m) return;
+  m.badge.className = 'sbadge ' + (state === 'ok' ? 'ok' : state === 'miss' ? 'warn' : 'neutral');
+  m.badge.textContent = state === 'ok' ? m.okText : state === 'miss' ? m.missText : '检测中…';
+  m.ok = state === 'pending' ? null : state === 'ok';
+  refreshReadyBadge();
 }
-function resetUploadPerm(){
-  if(permUpload){ permUpload.classList.remove('fail'); permUploadStatus.textContent = '检测中…'; }
-  if(connPermHint){ connPermHint.hidden = true; }
+function refreshReadyBadge(){
+  if (connGrid.hidden){ readyBadge.hidden = true; return; }
+  // tenant_access_token / bot:v3:info 为隐式校验，连接成功即计入就绪数
+  const okN = 2 + (PERM_META.upload.ok === true) + (PERM_META.drive.ok === true);
+  readyBadge.hidden = false;
+  readyBadge.textContent = okN + ' / 4 项就绪';
+  readyBadge.className = 'sc-count' + (okN === 4 ? '' : ' warn');
 }
-function updateUploadPerm(has, applyUrl){
-  if(!permUpload) return;
-  if(has){
-    permUpload.classList.remove('fail');
-    permUploadStatus.textContent = '已开通';
-    connPermHint.hidden = true;
-  } else {
-    permUpload.classList.add('fail');
-    permUploadStatus.textContent = '未开通';
-    connPermHint.hidden = false;
-    if(applyUrl && applyPermBtn){
-      applyPermBtn.onclick = () => openExternal(applyUrl);
-    }
+function refreshWarns(){
+  connPermHint.innerHTML = '';
+  const missing = Object.keys(PERM_META).filter(k => PERM_META[k].ok === false);
+  if (!missing.length){ connPermHint.hidden = true; return; }
+  connPermHint.hidden = false;
+  for (const key of missing){
+    const m = PERM_META[key];
+    const block = document.createElement('div');
+    block.className = 'sc-issue';
+    block.innerHTML = `<div class="issue-head">${WARN_SVG}<span>${m.title}</span></div><p>${m.desc}</p>`;
+    const row = document.createElement('div');
+    row.className = 'action-row';
+    const btn = document.createElement('button');
+    btn.className = 'btn-secondary';
+    btn.innerHTML = `${m.btn} <span aria-hidden="true">↗</span>`;
+    btn.onclick = () => openExternal(m.applyUrl);
+    row.appendChild(btn);
+    block.appendChild(row);
+    connPermHint.appendChild(block);
   }
+}
+function resetPerms(){
+  Object.keys(PERM_META).forEach(k => {
+    PERM_META[k].applyUrl = '';
+    setPermStatus(k, 'pending');
+  });
+  refreshWarns();
+}
+function updatePerm(key, has, applyUrl){
+  const m = PERM_META[key]; if(!m) return;
+  m.applyUrl = applyUrl || '';
+  setPermStatus(key, has ? 'ok' : 'miss');
+  refreshWarns();
 }
 let testingConn = false;
 async function runConnTest(){
@@ -701,10 +1402,9 @@ async function runConnTest(){
   testConnBtn.disabled = true;
   testConnLabel.textContent = '测试中…';
   try{
-    if(!invoke) throw 'Tauri 环境不可用';
     const result = await invoke('test_connection', {appId, appSecret});
     setConnCard('ok', '已连接 · ' + result.app_name, '刚刚校验');
-    updateUploadPerm(result.has_upload_permission, result.apply_url);
+    (result.permissions || []).forEach(p => updatePerm(p.key, p.ok, p.apply_url));
   }catch(e){
     const msg = typeof e === 'string' ? e : (e && e.message) || '未知错误';
     setConnCard('err', '连接失败 · ' + msg);
@@ -717,172 +1417,249 @@ async function runConnTest(){
 }
 testConnBtn.addEventListener('click', runConnTest);
 
+async function openExternal(url){
+  if(invoke){
+    try{ await invoke('plugin:opener|open_url', {url}); return; }
+    catch(e){ log('error', '打开外部链接失败: ' + (e.message || e)); }
+  }
+  window.open(url, '_blank', 'noopener');
+}
+$('#howToCredsLink')?.addEventListener('click', e => {
+  e.preventDefault();
+  openExternal('https://open.feishu.cn/document/faq/trouble-shooting/how-to-obtain-app-id');
+});
+$('#openFeishuPlatform')?.addEventListener('click', () => openExternal('https://open.feishu.cn/app'));
+
 function loadConfigForm(){
   $('#appIdInput').value = config.app_id || '';
   $('#secretInput').value = config.app_secret || '';
-  resetConnCard();
-  // 已有凭证时自动后台测试连接，恢复上次状态
-  if(config.app_id && config.app_secret){
-    setTimeout(runConnTest, 150);
-  }
+  setConnCard('idle', '未连接 · 填写凭证后点击「测试连接」');
+  if(config.app_id && config.app_secret) setTimeout(runConnTest, 150);
+  $('#portInput').value = config.transfer.configured_port;
+  $('#downloadDirPath').textContent = config.transfer.download_dir || '系统下载目录';
+  refreshKeyCard();
+  refreshServiceStatus();
 }
 async function saveConfigForm(){
   config.app_id = $('#appIdInput').value.trim();
   config.app_secret = $('#secretInput').value.trim();
-  await saveConfig();
+  saveConfig();
 }
 
-/* ===================== 主题 ===================== */
-const themeMql = window.matchMedia('(prefers-color-scheme: dark)');
-function applyTheme(pref){
-  const resolved = pref === 'dark' || pref === 'light' ? pref : (themeMql.matches ? 'dark' : 'light');
-  document.documentElement.dataset.theme = resolved;
-  document.documentElement.dataset.themePref = pref;
+/* ===================== 配置 · 文件传输 pane ===================== */
+function setPortNow(state, label, bound){
+  const now = $('#portNow');
+  now.classList.toggle('err', state === 'err');
+  $('.plbl', now).textContent = label;
+  $('#portBound').textContent = bound;
 }
-applyTheme('auto');
-$$('.theme-card').forEach(c => {
-  c.addEventListener('click', () => {
-    $$('.theme-card').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-pressed','false'); });
-    c.classList.add('active'); c.setAttribute('aria-pressed','true');
-    applyTheme(c.dataset.theme);
-  });
-});
-themeMql.addEventListener('change', () => {
-  if((document.documentElement.dataset.themePref || 'auto') === 'auto') applyTheme('auto');
-});
-
-$$('.switch').forEach(s => s.addEventListener('click', () => s.classList.toggle('on')));
-$$('.pref-seg').forEach(seg => {
-  seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-    seg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-  }));
-});
-
-/* ===================== 工具栏 ===================== */
-function wrapSelection(before, after){
-  const start = editor.selectionStart, end = editor.selectionEnd;
-  const val = editor.value;
-  const selected = val.slice(start, end) || '文字';
-  editor.value = val.slice(0,start) + before + selected + after + val.slice(end);
-  editor.selectionStart = start + before.length;
-  editor.selectionEnd = start + before.length + selected.length;
-  editor.focus(); refreshIntent();
-}
-function insertAtCursor(text){
-  const start = editor.selectionStart;
-  editor.value = editor.value.slice(0,start) + text + editor.value.slice(editor.selectionEnd);
-  editor.selectionStart = editor.selectionEnd = start + text.length;
-  editor.focus(); refreshIntent();
-}
-$$('.toolbar .tool').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const title = btn.getAttribute('title') || '';
-    if(title.includes('加粗')) wrapSelection('**','**');
-    else if(title.includes('斜体')) wrapSelection('*','*');
-    else if(title.includes('标题')) insertAtCursor('\n# ');
-    else if(title.includes('列表')) insertAtCursor('\n- ');
-    else if(title.includes('链接')) wrapSelection('[','](https://)');
-    else if(title.includes('代码')) wrapSelection('`','`');
-    else if(title.includes('图片')) $('.att-add', attStrip)?.click();
-    else if(title.includes('提及')) insertAtCursor('<at user_id="ou_all">所有人</at> ');
-    else if(title.includes('斜杠') || title.includes('元素')) toggleSlashMenu();
-  });
-});
-
-/* ===================== Slash 菜单 ===================== */
-const slashMenu = $('#slashMenu');
-function toggleSlashMenu(){ slashMenu.classList.toggle('show'); }
-$$('#slashMenu .row').forEach(row => {
-  row.addEventListener('click', () => {
-    const label = row.querySelector('b').textContent;
-    let template = '';
-    if(label === '标题栏') template = '\n```card\n{"config":{"wide_screen_mode":true},"header":{"title":{"tag":"plain_text","content":"标题"},"template":"blue"},"elements":[{"tag":"div","text":{"tag":"lark_md","content":"内容"}}]}\n```';
-    else if(label === '按钮组') template = '\n```card\n{"config":{"wide_screen_mode":true},"header":{"title":{"tag":"plain_text","content":"操作确认"},"template":"blue"},"elements":[{"tag":"action","actions":[{"tag":"button","text":{"tag":"plain_text","content":"确认"},"type":"primary"},{"tag":"button","text":{"tag":"plain_text","content":"取消"},"type":"default"}]}]}\n```';
-    else if(label === '分栏布局') template = '\n```card\n{"config":{"wide_screen_mode":true},"elements":[{"tag":"column_set","columns":[{"tag":"column","elements":[{"tag":"div","text":{"tag":"plain_text","content":"左列"}}]},{"tag":"column","elements":[{"tag":"div","text":{"tag":"plain_text","content":"右列"}}]}]}]}\n```';
-    insertAtCursor(template);
-    slashMenu.classList.remove('show');
-  });
-});
-editor.addEventListener('keydown', e => {
-  if(e.key === '/' && !e.metaKey && !e.ctrlKey){
-    setTimeout(() => { if(editor.value[editor.selectionStart-1] === '/') slashMenu.classList.add('show'); }, 0);
+async function refreshServiceStatus(){
+  if(!invoke){ setPortNow('err', '未连接', 'Tauri 不可用'); return; }
+  try{
+    const st = await invoke('transfer_service_status');
+    if (st.status === 'Running') setPortNow('', '实际绑定', '127.0.0.1:' + st.bound_port);
+    else if (st.status === 'Failed') setPortNow('err', '端口被占用', (st.requested_port || st.bound_port || '') + ' 端口不可用，换一个再重启');
+    else if (st.status === 'Starting') setPortNow('', '启动中', '…');
+    else setPortNow('err', '未运行', '本地服务未启动');
+  }catch(e){
+    setPortNow('err', '未运行', '传输服务尚未接入（P3）');
   }
-  if(e.key === 'Escape') slashMenu.classList.remove('show');
-});
-
-/* ===================== 编辑/预览切换 ===================== */
-$$('.mode button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    $$('.mode button').forEach(x => { x.classList.remove('active'); x.setAttribute('aria-selected','false'); });
-    btn.classList.add('active'); btn.setAttribute('aria-selected','true');
-    if(btn.textContent.trim() === '预览') showPreview(); else hidePreview();
-  });
-});
-function showPreview(){
-  const wrap = $('.editor-wrap');
-  let pv = $('#previewPane');
-  if(!pv){
-    pv = document.createElement('div');
-    pv.id = 'previewPane';
-    pv.style.cssText = 'flex:1;padding:18px 20px;overflow-y:auto;font-size:14.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word;';
-    wrap.appendChild(pv);
+}
+$('#portRestart').addEventListener('click', async () => {
+  const p = ($('#portInput').value || '').trim();
+  if (!/^\d+$/.test(p) || +p < 1024 || +p > 65535){
+    setPortNow('err', '端口无效', '请填 1024–65535 的高位端口');
+    return;
   }
-  pv.innerHTML = mdToHtml(editor.value);
-  pv.style.display = '';
-  editor.style.display = 'none';
-}
-function hidePreview(){
-  const pv = $('#previewPane');
-  if(pv) pv.style.display = 'none';
-  editor.style.display = '';
-}
-function mdToHtml(md){
-  let html = esc(md);
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/`([^`]+)`/g, '<code style="background:var(--surface-soft);padding:1px 5px;border-radius:4px;">$1</code>');
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:var(--accent-ink);text-decoration:underline;" target="_blank">$1</a>');
-  html = html.replace(/^# (.+)$/gm, '<h3 style="margin:8px 0;font-size:16px;">$1</h3>');
-  html = html.replace(/\n/g, '<br>');
-  return html;
-}
-
-/* ===================== 快捷键 & 分段控件 ===================== */
-editor.addEventListener('keydown', e => {
-  const isMod = e.metaKey || e.ctrlKey;
-  if(isMod && e.key === 'Enter'){ e.preventDefault(); send(); }
+  if(!invoke) return;
+  try{
+    config.transfer.configured_port = +p;
+    saveConfig();
+    const st = await invoke('transfer_service_restart', {port: +p});
+    if (st.status === 'Running'){
+      setPortNow('', '实际绑定', '127.0.0.1:' + st.bound_port);
+      toast('本地服务已重启', '端口 ' + st.bound_port);
+    } else {
+      setPortNow('err', '端口被占用', p + ' 被占用，换一个再重启');
+    }
+  }catch(e){
+    setPortNow('err', '端口被占用', String(e).slice(0, 60));
+  }
 });
-sendBtn.addEventListener('click', send);
+$('#dirPick').addEventListener('click', async () => {
+  if(!invoke) return;
+  try{
+    const dir = await invoke('plugin:dialog|open', {options: {directory: true, multiple: false, title: '选择下载目录'}});
+    if (dir){
+      config.transfer.download_dir = dir;
+      $('#downloadDirPath').textContent = dir;
+      saveConfig();
+    }
+  }catch(e){ toast('目录选择不可用', String(e).slice(0,60), 'err'); }
+});
 
-segBtns.forEach(b => b.addEventListener('click', async () => {
-  segBtns.forEach(x => { x.classList.remove('active'); x.setAttribute('aria-selected','false'); });
-  b.classList.add('active'); b.setAttribute('aria-selected','true');
-  forcedType = b.dataset.type;
-  config.last_type = forcedType;
-  await saveConfig();
-  refreshIntent();
-}));
+/* 密钥卡 */
+async function refreshKeyCard(){
+  if(!invoke) return;
+  try{
+    const st = await invoke('key_status');
+    const has = st.has_key;
+    $('#keyHeadTitle').textContent = has ? '传输密钥 · 已配对' : '传输密钥 · 未配置';
+    $('#keyFp').hidden = !has;
+    if (has){
+      $('#keyFp').textContent = '指纹 ' + st.fingerprint;
+      $('#keyStoreHint').textContent = (st.has_previous ? '存在过渡旧密钥 · ' : '') + '存于系统凭据库';
+    } else {
+      $('#keyStoreHint').textContent = '尚未生成或导入主密钥';
+    }
+    $('[data-key="export"]').hidden = !has;
+    $('[data-key="rotate"]').hidden = !has;
+    $('#keyGenerateBtn').textContent = has ? '重新生成' : '生成密钥';
+  }catch(e){
+    $('#keyStoreHint').textContent = '密钥服务尚未接入（P1）';
+  }
+}
+const keyCard = $('#keyCard');
+keyCard.addEventListener('click', e => {
+  const b = e.target.closest('[data-key]');
+  if (!b || b.hidden) return;
+  const k = b.dataset.key;
+  if (k === 'export'){ keyCard.setAttribute('data-slot', keyCard.dataset.slot === 'export' ? '' : 'export'); doKeyExport(); return; }
+  keyCard.setAttribute('data-slot', keyCard.dataset.slot === k ? '' : k);
+});
+async function doKeyExport(){
+  try{
+    const hex = await invoke('key_export');
+    const code = $('#keyPlain');
+    code.dataset.plain = hex;
+    code.textContent = '•••• •••• •••• •••• •••• •••• •••• ••••';
+    code.classList.add('masked');
+    $('#keyReveal').textContent = '显示';
+  }catch(e){ toast('导出失败', String(e).slice(0,80), 'err'); }
+}
+$('#keyReveal').addEventListener('click', () => {
+  const code = $('#keyPlain');
+  if (!code.dataset.plain) return;
+  const masked = code.classList.contains('masked');
+  code.classList.toggle('masked', !masked);
+  code.textContent = masked ? code.dataset.plain : '•••• •••• •••• •••• •••• •••• •••• ••••';
+  $('#keyReveal').textContent = masked ? '隐藏' : '显示';
+});
+$('#keyCopy').addEventListener('click', e => {
+  const code = $('#keyPlain');
+  if (code.dataset.plain && navigator.clipboard) navigator.clipboard.writeText(code.dataset.plain).catch(() => {});
+  e.currentTarget.textContent = '已复制';
+  setTimeout(() => { e.currentTarget.textContent = '复制'; }, 1600);
+});
+$('#keyImportInput').addEventListener('input', function(){
+  const v = this.value.trim();
+  const box = $('#keyImportFp');
+  box.hidden = !v;
+  const valid = /^[0-9a-fA-F]{64}$/.test(v);
+  if (valid){
+    importFpOk = true;
+    box.classList.remove('bad');
+    $('#keyImportFpText').innerHTML = '指纹 <code>' + v.slice(0,8).toLowerCase() + '</code> —— 请与另一台机器显示的指纹逐位核对后再导入';
+    $('#keyImportConfirm').disabled = false;
+  } else {
+    importFpOk = false;
+    box.classList.add('bad');
+    $('#keyImportFpText').textContent = '还不是一把完整的密钥：需要 64 位十六进制字符，当前 ' + v.length + ' 位';
+    $('#keyImportConfirm').disabled = true;
+  }
+});
+$('#keyGenerateConfirm').addEventListener('click', async () => {
+  if(!invoke) return;
+  try{
+    const st = await invoke('key_generate');
+    toast('密钥已生成', '指纹 ' + st.fingerprint);
+    keyCard.setAttribute('data-slot','');
+    refreshKeyCard();
+  }catch(e){ toast('生成失败', String(e).slice(0,80), 'err'); }
+});
+$('#keyImportConfirm').addEventListener('click', async () => {
+  if(!invoke || !importFpOk) return;
+  try{
+    const st = await invoke('key_import', {hex: $('#keyImportInput').value.trim()});
+    toast('密钥已导入', '指纹 ' + st.fingerprint);
+    $('#keyImportInput').value = '';
+    $('#keyImportFp').hidden = true;
+    keyCard.setAttribute('data-slot','');
+    refreshKeyCard();
+  }catch(e){ toast('导入失败', String(e).slice(0,80), 'err'); }
+});
+$('#keyRotateConfirm').addEventListener('click', async () => {
+  if(!invoke) return;
+  try{
+    const st = await invoke('key_rotate');
+    toast('密钥已轮换', '新指纹 ' + st.fingerprint + ' · 旧密钥保留 30 天');
+    keyCard.setAttribute('data-slot','');
+    refreshKeyCard();
+  }catch(e){ toast('轮换失败', String(e).slice(0,80), 'err'); }
+});
 
-editor.addEventListener('input', refreshIntent);
+/* 服务状态事件（后端推送） */
+listenEvent('transfer://state', ev => {
+  const p = ev.payload || {};
+  if (p.status === 'Running') setPortNow('', '实际绑定', '127.0.0.1:' + p.bound_port);
+  else if (p.status === 'Failed') setPortNow('err', '端口被占用', '换一个端口再重启');
+});
+
+/* ===================== 偏好 ===================== */
+function initPrefControls(){
+  // 智能识别默认
+  $$('#segDetect button').forEach(b => {
+    b.classList.toggle('active', b.dataset.v === (config.last_type || 'auto'));
+    b.onclick = () => {
+      $$('#segDetect button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      config.last_type = b.dataset.v;
+      saveConfig(); refresh();
+    };
+  });
+  // 发送快捷键
+  $$('#segHotkey button').forEach(b => {
+    b.classList.toggle('active', b.dataset.v === hotkeyMode);
+    b.onclick = () => {
+      $$('#segHotkey button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      hotkeyMode = b.dataset.v;
+      config.hotkey = hotkeyMode;
+      saveConfig();
+    };
+  });
+  // 开关（提示音 / 粘贴自动插入）暂存于 config.prefs
+  const prefs = config.prefs || (config.prefs = {sound: true, paste: true});
+  [['#swSound','sound'],['#swPaste','paste']].forEach(([sel,key]) => {
+    const el = $(sel);
+    el.classList.toggle('on', prefs[key] !== false);
+    el.onclick = () => {
+      el.classList.toggle('on');
+      prefs[key] = el.classList.contains('on');
+      saveConfig();
+    };
+  });
+  $('#residentSwitch').onclick = function(){ this.classList.toggle('on'); };
+}
+$$('.switch').forEach(s => { if (!s.onclick) s.addEventListener('click', () => s.classList.toggle('on')); });
 
 /* ===================== 初始化 ===================== */
 async function init(){
   await loadConfig();
-  // 分段控件状态
-  segBtns.forEach(b => b.classList.toggle('active', b.dataset.type === forcedType));
+  applyTheme(config.theme || 'auto');
+  initThemeCards();
+  initPrefControls();
   renderBotMenu();
   updateBotPicker();
-  renderAttachments();
-  renderHistory();
-  refreshIntent();
-  setResult(null, '就绪');
-  setTimeout(() => { const s = resultEl.querySelector('span:nth-child(2)'); if(s) s.innerHTML = '等待发送'; }, 100);
+  renderStream();
+  refresh();
   // 动态填充关于页版本号
   try {
-    const ver = await window.__TAURI__.app.getVersion();
+    const ver = await TAURI.app.getVersion();
     const el = document.getElementById('aboutVersion');
     if(el && ver) el.textContent = 'v' + ver;
   } catch(e) {}
+  log('info', '前端初始化完成 · history=' + config.history.length);
 }
 init();
 

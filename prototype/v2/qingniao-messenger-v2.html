@@ -1,0 +1,3401 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-theme-pref="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>青鸟 · 飞书消息助手 v2</title>
+<style>
+  /* ============================================================
+     令牌 —— 与 v1 完全一致，不做改动
+     ============================================================ */
+  :root{
+    --bg: oklch(0.975 0.004 220);
+    --surface: oklch(1 0 0);
+    --surface-soft: oklch(0.983 0.005 220);
+    --fg: oklch(0.24 0.02 240);
+    --muted: oklch(0.48 0.015 240);
+    --muted-2: oklch(0.72 0.012 240);
+    --border: oklch(0.918 0.008 220);
+    --border-strong: oklch(0.86 0.01 220);
+    --accent: oklch(0.63 0.107 175);
+    --accent-ink: oklch(0.34 0.075 175);
+    --accent-soft: oklch(0.955 0.03 175);
+    --accent-soft-2: oklch(0.92 0.05 175);
+    /* 实心品牌按钮的填充：比品牌色深一档，白字/白图标才够对比度 */
+    --accent-fill: oklch(0.55 0.105 175);
+    --accent-fill-hover: oklch(0.49 0.105 175);
+    --danger: oklch(0.5 0.19 25);
+    --warn: oklch(0.72 0.15 75);
+    --ok: oklch(0.63 0.12 155);
+    --up: oklch(0.63 0.107 175);
+    --up-ink: oklch(0.34 0.075 175);
+    --up-soft: oklch(0.955 0.03 175);
+    --down: oklch(0.52 0.14 265);
+    --down-ink: oklch(0.4 0.12 265);
+    --down-soft: oklch(0.94 0.04 265);
+    --post-soft: oklch(0.94 0.04 265);
+    --post-ink: oklch(0.4 0.12 265);
+    --img-soft: oklch(0.95 0.04 130);
+    --img-ink: oklch(0.4 0.12 130);
+    --card-soft: oklch(0.94 0.04 45);
+    --card-ink: oklch(0.42 0.12 45);
+    --track: oklch(0.925 0.008 220);
+    --shadow-sm: 0 1px 0 oklch(0.9 0.005 240 / 0.5), 0 1px 2px oklch(0.2 0.02 240 / 0.04);
+    --shadow-md: 0 1px 0 oklch(0.9 0.005 240 / 0.5), 0 8px 24px oklch(0.2 0.02 240 / 0.06);
+    --radius: 14px;
+    --radius-sm: 10px;
+    --radius-xs: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+    --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    /* 窗口控件与主题缩略图色板：属于系统外观，不是品牌色，单独收进令牌表 */
+    --win-close:#ff5f57;
+    --win-min:#febc2e;
+    --win-max:#28c840;
+    --prv-light:#f5f7f9;
+    --prv-light-card:#ffffff;
+    --prv-light-line:oklch(0.9 0.005 220);
+    --prv-dark:#1a1d24;
+    --prv-dark-line:#2a2f3a;
+    --prv-dark-bar:#262b36;
+    --prv-dark-body:#232833;
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family: var(--font-sans);
+    color: var(--fg);
+    background: var(--bg);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  button{font-family:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}
+  input, textarea{font-family:inherit;font-size:inherit;color:inherit}
+  textarea{resize:none}
+  ::placeholder{color: var(--muted-2)}
+  :focus-visible{outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 5px}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background: var(--border-strong); border-radius:99px; border:3px solid transparent; background-clip: content-box}
+  ::-webkit-scrollbar-thumb:hover{background: var(--muted-2); background-clip: content-box}
+  ::-webkit-scrollbar-track{background:transparent}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}
+  }
+
+  /* ============================================================
+     外壳 —— 标题栏 / 顶栏 / 消息区 / 输入区
+     ============================================================ */
+  .app{
+    display:grid;
+    grid-template-rows: 40px auto minmax(0,1fr) auto;
+    height:100vh;
+  }
+
+  .titlebar{
+    display:flex; align-items:center; gap:8px;
+    padding: 0 14px;
+    background: linear-gradient(180deg, oklch(0.98 0.003 220), oklch(0.955 0.005 220));
+    border-bottom: 1px solid var(--border);
+    user-select:none;
+    position:relative;
+  }
+  .traffic{display:flex; gap:8px}
+  .traffic i{width:12px;height:12px;border-radius:50%;display:block}
+  .traffic i.r{background: var(--win-close)}
+  .traffic i.y{background: var(--win-min)}
+  .traffic i.g{background: var(--win-max)}
+  .titlebar .title{
+    position:absolute; left:0; right:0;
+    text-align:center; font-size:13px; color: var(--muted);
+    pointer-events:none;
+  }
+
+  header.appbar{
+    display:flex; align-items:center; gap:14px;
+    padding: 12px 20px 10px;
+  }
+  .logo{
+    width:40px; height:40px; border-radius:11px;
+    background: radial-gradient(120% 120% at 20% 15%, oklch(0.7 0.13 175) 0%, var(--accent) 50%, oklch(0.5 0.09 175) 100%);
+    display:grid; place-items:center;
+    box-shadow: inset 0 -3px 6px oklch(0.35 0.06 175 / 0.35), 0 4px 14px oklch(0.45 0.09 175 / 0.25);
+    color: white; flex:none;
+  }
+  .logo svg{width:20px;height:20px}
+  .brand h1{font-size:15.5px; margin:0; letter-spacing:0.2px}
+  .brand p{margin:2px 0 0; font-size:12px; color: var(--muted)}
+  .spacer{flex:1}
+
+  .bot-picker-wrap{position:relative}
+  .bot-picker{
+    display:flex; align-items:center; gap:8px;
+    padding: 7px 10px 7px 12px;
+    border:1px solid var(--border); border-radius: 10px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    cursor:pointer;
+  }
+  .bot-picker:hover{border-color: var(--border-strong)}
+  .bot-picker .dot{width:8px;height:8px;border-radius:50%;background: var(--ok); box-shadow: 0 0 0 3px oklch(0.63 0.12 155 / 0.15); flex:none}
+  .bot-picker b{font-weight:600}
+  .bot-picker .caret{color: var(--muted-2); display:inline-flex}
+  .bot-menu{
+    position:absolute; top: calc(100% + 6px); right: 0;
+    min-width: 320px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px oklch(0.15 0.02 240 / 0.14);
+    padding: 6px; z-index: 90; display:none;
+  }
+  .bot-menu.show{display:block; animation: fadeIn .12s ease}
+  .bot-menu-title{padding: 10px 12px 4px; font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600}
+  .bot-item{
+    width:100%; display:grid; grid-template-columns: auto 1fr auto; gap:10px; align-items:center;
+    padding: 8px 10px; border-radius: 8px; background:none; border:none; text-align:left; cursor:pointer; color:inherit;
+  }
+  .bot-item:hover{background: var(--surface-soft)}
+  .bot-item.active{background: var(--accent-soft)}
+  .bot-item .bdot{width:8px;height:8px;border-radius:50%;background: var(--ok); box-shadow: 0 0 0 3px oklch(0.63 0.12 155 / 0.15)}
+  .bot-item .bdot.muted{background: var(--muted-2); box-shadow: 0 0 0 3px oklch(0.55 0.015 240 / 0.15)}
+  .bot-item .binfo{min-width:0}
+  .bot-item .binfo b{display:block; font-size:13px; color: var(--fg); font-weight:500}
+  .bot-item .binfo span{font-size:11px; color: var(--muted); font-family: var(--font-mono); display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .bot-item .check{color: var(--accent-ink); width:14px; height:14px}
+  .bot-item:not(.active) .check{visibility:hidden}
+  .bot-menu-divider{height:1px; background: var(--border); margin: 4px 6px}
+  .bot-menu-action{width:100%; display:flex; align-items:center; gap:10px; padding:10px; border-radius:8px; background:none; border:none; cursor:pointer; color: var(--fg); font-size:13px; text-align:left}
+  .bot-menu-action:hover{background: var(--surface-soft)}
+  .bot-menu-action svg{width:14px; height:14px; color: var(--muted)}
+  .bot-menu-action .sub{margin-left:auto; color: var(--muted); font-size:11px}
+
+  .btn-ghost{
+    padding: 7px 12px; border:1px solid var(--border); border-radius:10px;
+    background: var(--surface); box-shadow: var(--shadow-sm); cursor:pointer;
+  }
+  .btn-ghost:hover{background: oklch(0.985 0.003 220); border-color: var(--border-strong)}
+  .btn-ghost.btn-icon{width:34px;height:34px;padding:0;display:inline-grid;place-items:center}
+  .btn-ghost.btn-icon svg{width:16px;height:16px}
+
+  /* ============================================================
+     消息区 —— 横向铺满，占据窗体主体
+     ============================================================ */
+  .chat{
+    display:flex; flex-direction:column; min-height:0;
+    border-top: 1px solid var(--border);
+  }
+  .chat-head{
+    display:flex; align-items:center; gap:12px;
+    padding: 9px 20px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklch, var(--bg) 90%, transparent);
+    backdrop-filter: blur(10px);
+    flex:none;
+  }
+  .chat-head .cn{display:flex; align-items:center; gap:8px; min-width:0}
+  .chat-head .cn b{font-size:13.5px; font-weight:600}
+  .chat-head .cn .sep{color: var(--muted-2)}
+  .chat-head .cn span{font-size:12.5px; color: var(--muted)}
+  .chat-stat{display:flex; align-items:center; gap:10px; font-family: var(--font-mono); font-size:11.5px; color: var(--muted)}
+  .chat-stat .s{display:inline-flex; align-items:center; gap:5px}
+  .chat-stat .s i{width:6px;height:6px;border-radius:50%;display:block;font-style:normal}
+  .chat-stat .s.up i{background: var(--up)}
+  .chat-stat .s.down i{background: var(--down)}
+  .chat-act{
+    display:inline-flex; align-items:center; gap:6px;
+    padding: 5px 10px; border-radius: 8px;
+    border: 1px solid transparent; color: var(--muted); font-size:12.5px;
+  }
+  .chat-act svg{width:14px; height:14px}
+  .chat-act:hover{background: var(--surface); border-color: var(--border); color: var(--fg)}
+  .chat-act.danger:hover{color: var(--danger); border-color: oklch(0.87 0.09 25); background: oklch(0.985 0.022 25)}
+  .chat-act.confirming{color: var(--danger); border-color: oklch(0.87 0.09 25); background: oklch(0.985 0.022 25); font-weight:500}
+
+  .chat-scroll{
+    flex:1; min-height:0; overflow-y:auto; overflow-x:hidden;
+    padding: 6px 0 20px;
+    scroll-behavior: smooth;
+  }
+
+  /* 日期分隔 */
+  .daysep{
+    display:flex; align-items:center; gap:14px;
+    padding: 14px 20px 6px;
+    font-size: 11.5px; color: var(--muted);
+    font-family: var(--font-mono);
+  }
+  .daysep::after{content:''; flex:1; height:1px; background: var(--border)}
+
+  /* 消息行 */
+  .msg{
+    display:grid; grid-template-columns: 36px minmax(0,1fr); gap: 12px;
+    padding: 9px 20px;
+    position:relative;
+  }
+  .msg + .msg{padding-top: 5px}
+  .msg .av{
+    width:36px; height:36px; border-radius:50%;
+    display:grid; place-items:center; flex:none;
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    overflow:hidden;
+  }
+  .msg .av.bot{
+    background: radial-gradient(120% 120% at 20% 15%, oklch(0.7 0.13 175) 0%, var(--accent) 50%, oklch(0.5 0.09 175) 100%);
+    border-color: transparent; color:white;
+    box-shadow: inset 0 -2px 5px oklch(0.35 0.06 175 / 0.35);
+  }
+  .msg .av.bot svg{width:18px;height:18px}
+  .msg .av.person{background: linear-gradient(135deg, oklch(0.93 0.03 45), oklch(0.88 0.05 25)); color: oklch(0.45 0.1 35); font-size:13px; font-weight:600; border-color: transparent}
+  .msg .col{min-width:0; display:flex; gap:8px; align-items:flex-start}
+  .msg .stack{min-width:0; max-width: min(860px, 100%)}
+  .msg .who{
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    margin-bottom: 5px; min-height:20px;
+  }
+  .msg .who b{font-size:13px; font-weight:600; color: var(--fg)}
+  .msg .who .tag{
+    font-size: 10.5px; padding: 1px 6px; border-radius: 4px;
+    background: var(--accent-soft); color: var(--accent-ink);
+    font-family: var(--font-mono); letter-spacing:0.2px;
+  }
+  .msg .who .tag.ro{background: var(--track); color: var(--muted)}
+  .msg .who .time{font-size:11px; color: var(--muted); font-family: var(--font-mono)}
+  .msg .who .dir{
+    font-size:10.5px; padding:1px 6px; border-radius:4px;
+    background: var(--up-soft); color: var(--up-ink); font-weight:500;
+  }
+  .msg .who .dir.in{background: var(--down-soft); color: var(--down-ink)}
+
+  /* 气泡 */
+  .bubble{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    max-width: 100%;
+  }
+  .bubble.plain{
+    background: var(--surface-soft);
+    box-shadow: none;
+    padding: 9px 13px;
+    font-size: 13.5px; line-height: 1.7;
+    color: var(--fg);
+  }
+  .bub-head{
+    display:flex; align-items:center; gap:8px;
+    padding: 8px 13px;
+    font-size: 13px; font-weight: 600;
+    background: var(--surface-soft);
+    border-bottom: 1px solid var(--border);
+    color: var(--fg);
+  }
+  .bub-head .htype{
+    margin-left:auto; font-family: var(--font-mono); font-size: 10.5px; font-weight: 400;
+    letter-spacing:0.3px; opacity: 0.75;
+  }
+  .bub-head.post{background: var(--post-soft); color: var(--post-ink); border-bottom-color: color-mix(in oklch, var(--post-ink) 16%, transparent)}
+  .bub-head.card{background: var(--card-soft); color: var(--card-ink); border-bottom-color: color-mix(in oklch, var(--card-ink) 16%, transparent)}
+  .bub-head.img{background: var(--img-soft); color: var(--img-ink); border-bottom-color: color-mix(in oklch, var(--img-ink) 16%, transparent)}
+  .bub-head.file{background: var(--up-soft); color: var(--up-ink); border-bottom-color: color-mix(in oklch, var(--up-ink) 16%, transparent)}
+  .bub-body{padding: 12px 14px; font-size: 13.5px; line-height: 1.75; color: var(--fg)}
+  .bub-body > * + *{margin-top: 9px}
+  .bub-body p{margin:0}
+  .bub-body ul{margin:0; padding-left: 18px}
+  .bub-body li{margin: 2px 0}
+  .bub-body h4{margin:0; font-size: 14px; font-weight:600}
+  .bub-body code{
+    font-family: var(--font-mono); font-size: 12.5px;
+    background: var(--surface-soft); padding: 1px 5px; border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .bub-body a{color: var(--accent-ink); text-decoration: none; border-bottom: 1px solid var(--accent-soft-2)}
+  .bub-body a:hover{border-bottom-color: var(--accent)}
+  .bub-body strong{font-weight:600}
+  .bub-body .at{
+    display:inline-flex; align-items:center;
+    font-size: 12.5px; padding: 0 5px; border-radius: 4px;
+    background: var(--accent-soft); color: var(--accent-ink);
+  }
+  .bub-body .quote{
+    border-left: 2px solid var(--border-strong);
+    padding-left: 10px; color: var(--muted); font-size: 13px;
+  }
+  .bub-foot{
+    display:flex; align-items:center; gap:8px;
+    padding: 8px 13px;
+    border-top: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--surface), var(--surface-soft));
+    font-size: 11.5px; color: var(--muted);
+    font-family: var(--font-mono);
+  }
+  .bub-foot .ok{color: var(--ok); display:inline-flex; align-items:center; gap:4px}
+  .bub-foot .ok svg{width:12px;height:12px}
+  .bub-foot .acts{margin-left:auto; display:flex; gap:6px}
+  .bub-foot .acts button{
+    font-family: var(--font-sans); font-size:11.5px; padding: 2px 8px; border-radius:6px;
+    border:1px solid var(--border); background: var(--surface); color: var(--muted);
+  }
+  .bub-foot .acts button:hover{color: var(--fg); border-color: var(--border-strong)}
+
+  /* 回复数 */
+  .thread{
+    display:inline-flex; align-items:center; gap:6px;
+    margin-top: 6px; padding: 3px 9px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--border);
+    font-size: 11.5px; color: var(--muted); cursor:pointer;
+  }
+  .thread svg{width:12px;height:12px}
+  .thread:hover{color: var(--fg); border-color: var(--border-strong)}
+
+  /* 悬停操作条 */
+  .msg-acts{
+    display:flex; align-items:center; gap:2px;
+    margin-top: 20px;
+    opacity: 0; pointer-events: none;
+    transition: opacity .12s ease;
+    flex:none;
+  }
+  .msg:hover .msg-acts, .msg:focus-within .msg-acts{opacity:1; pointer-events:auto}
+  .msg-acts button{
+    width:28px; height:28px; border-radius:7px;
+    display:grid; place-items:center; color: var(--muted);
+    border:1px solid var(--border); background: var(--surface);
+  }
+  .msg-acts button:hover{color: var(--fg); border-color: var(--border-strong); background: var(--surface-soft)}
+  .msg-acts button.danger:hover{color: var(--danger); border-color: oklch(0.87 0.09 25)}
+  .msg-acts button svg{width:14px;height:14px}
+
+  /* 图片消息 */
+  .img-grid{
+    display:grid; gap: 6px; padding: 10px;
+    grid-template-columns: repeat(2, minmax(0,1fr));
+  }
+  .img-grid.one{grid-template-columns: minmax(0, 340px)}
+  .thumb{
+    position:relative; border-radius: 9px; overflow:hidden;
+    border: 1px solid var(--border);
+    aspect-ratio: 4 / 3;
+    background:
+      linear-gradient(135deg, var(--accent-soft), var(--fg-soft, oklch(0.9 0.01 240))),
+      var(--surface-soft);
+  }
+  .thumb .tn{
+    position:absolute; left:0; right:0; bottom:0;
+    padding: 14px 9px 6px;
+    font-family: var(--font-mono); font-size: 10.5px; color: white;
+    background: linear-gradient(180deg, transparent, oklch(0.15 0.02 240 / 0.78));
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .thumb.a{background: linear-gradient(135deg, oklch(0.88 0.07 200), oklch(0.72 0.11 265))}
+  .thumb.b{background: linear-gradient(135deg, oklch(0.9 0.06 150), oklch(0.74 0.1 190))}
+  .thumb.c{background: linear-gradient(135deg, oklch(0.92 0.07 85), oklch(0.78 0.12 40))}
+
+  /* 内联图片芯片（输入框内 / 徽标） */
+  .chip{
+    display:inline-flex; align-items:center; gap:7px;
+    vertical-align: bottom;
+    margin: 2px 2px;
+    padding: 3px 9px 3px 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    font-size: 12.5px; color: var(--fg);
+    max-width: 220px;
+    user-select: none;
+  }
+  .chip .cthumb{
+    width: 26px; height: 26px; border-radius: 5px; flex:none;
+    background: linear-gradient(135deg, oklch(0.88 0.07 200), oklch(0.72 0.11 265));
+  }
+  .chip .cthumb.b{background: linear-gradient(135deg, oklch(0.9 0.06 150), oklch(0.74 0.1 190))}
+  .chip .cnm{overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  .chip .cx{
+    flex:none; width:16px; height:16px; border-radius:50%;
+    display:grid; place-items:center; color: var(--muted); font-size:13px; line-height:1;
+  }
+  .chip .cx:hover{background: var(--surface-soft); color: var(--fg)}
+
+  /* ============================================================
+     文件记录（嵌在历史里）
+     ============================================================ */
+  .filecard{
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    max-width: 560px;
+  }
+  .fc-main{display:grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 11px; align-items:center; padding: 12px 13px}
+  .fc-ico{
+    width: 40px; height: 40px; border-radius: 10px; flex:none;
+    display:grid; place-items:center;
+    background: var(--up-soft); color: var(--up-ink);
+  }
+  .fc-ico.down{background: var(--down-soft); color: var(--down-ink)}
+  .fc-ico.fail{background: oklch(0.96 0.05 25); color: var(--danger)}
+  .fc-ico svg{width:18px;height:18px}
+  .fc-info{min-width:0}
+  .fc-info b{display:block; font-size: 13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .fc-info .fmeta{
+    display:flex; align-items:center; gap:8px; margin-top: 3px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+  }
+  .fc-info .fmeta .live{color: var(--up-ink)}
+  .fc-info .fmeta .live.down{color: var(--down-ink)}
+  .fc-cancel{
+    width:26px; height:26px; border-radius:7px; flex:none;
+    display:grid; place-items:center; color: var(--muted);
+  }
+  .fc-cancel:hover{background: var(--surface-soft); color: var(--danger)}
+  .fc-cancel svg{width:14px;height:14px}
+  .fc-bar{height: 4px; background: var(--track); overflow:hidden}
+  .fc-bar > i{display:block; height:100%; background: var(--up); transition: width .3s ease-out}
+  .filecard.down .fc-bar > i{background: var(--down)}
+  .filecard.fail .fc-bar > i{background: var(--danger)}
+  .filecard.done .fc-bar, .filecard.fail .fc-bar{display:none}
+  .fc-bot{
+    display:flex; align-items:center; gap:8px;
+    padding: 8px 13px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-soft);
+    font-size: 11.5px; color: var(--muted);
+  }
+  .fc-bot .st{display:inline-flex; align-items:center; gap:5px; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  .fc-bot .st svg{width:12px;height:12px;flex:none}
+  .filecard.done .fc-bot .st{color: var(--ok)}
+  .filecard.fail .fc-bot .st{color: var(--danger)}
+  .fc-bot .bacts{margin-left:auto; display:flex; gap:6px; flex:none}
+  .fc-bot .bacts button{
+    font-size:11.5px; padding: 4px 9px; border-radius:7px;
+    border:1px solid var(--border); background: var(--surface); color: var(--muted);
+  }
+  .fc-bot .bacts button:hover{color: var(--fg); border-color: var(--border-strong)}
+  .fc-bot .bacts button.hi{color: var(--accent-ink); border-color: var(--accent-soft-2); background: var(--surface)}
+  .fc-bot .bacts button.hi:hover{background: var(--accent-soft); color: var(--accent-ink)}
+
+  /* 卡片消息（交互卡片） */
+  .card-msg{padding: 12px 14px}
+  .card-msg .cm-head{font-size:14px; font-weight:600; margin-bottom:6px}
+  .card-msg .cm-desc{font-size:13px; color: var(--muted); line-height:1.7}
+  .card-msg .cm-kv{
+    display:grid; grid-template-columns: 92px minmax(0,1fr);
+    gap: 3px 10px; margin-top: 10px; font-size:12.5px;
+  }
+  .card-msg .cm-kv dt{color: var(--muted)}
+  .card-msg .cm-kv dd{margin:0; color: var(--fg); font-family: var(--font-mono); font-size:12px}
+  .card-btns{display:flex; gap:8px; padding: 0 14px 13px}
+  .card-btns button{
+    padding: 6px 14px; border-radius: 8px; font-size:12.5px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+  }
+  .card-btns button:hover{border-color: var(--border-strong); background: var(--surface-soft)}
+  .card-btns button.primary{background: var(--accent-fill); color: white; border-color: var(--accent-fill); font-weight:500}
+  .card-btns button.primary:hover{background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); color:white}
+  .card-btns button.danger{color: var(--danger); border-color: oklch(0.87 0.09 25)}
+  .card-btns button.danger:hover{background: oklch(0.985 0.022 25); border-color: var(--danger)}
+
+  /* 空状态 */
+  .chat-empty{
+    display:none;
+    flex-direction: column; align-items:center; justify-content:center;
+    gap: 12px; padding: 60px 24px; text-align:center;
+  }
+  .chat-empty.show{display:flex}
+  .chat-empty .ce-ico{
+    width: 52px; height: 52px; border-radius: 15px;
+    display:grid; place-items:center;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .chat-empty .ce-ico svg{width:23px;height:23px}
+  .chat-empty b{font-size:14px; font-weight:600}
+  .chat-empty p{margin:0; font-size:12.5px; color: var(--muted); max-width: 42ch; line-height:1.75}
+
+  /* ============================================================
+     输入区 —— 单行输入与发送按钮整合在同一行
+     ============================================================ */
+  .composer{
+    padding: 8px 20px 14px;
+    background: linear-gradient(180deg, color-mix(in oklch, var(--bg) 40%, transparent), var(--bg));
+  }
+  .composer-shell{
+    display:flex; align-items:flex-end; gap:6px;
+    padding: 6px 8px 6px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    box-shadow: var(--shadow-md);
+    transition: border-color .14s ease, box-shadow .14s ease;
+  }
+  .composer-shell:focus-within{
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft-2), var(--shadow-md);
+  }
+  .ed{
+    flex: 1 1 0; min-width: 0;
+    max-height: 168px; overflow-y: auto;
+    padding: 8px 0;
+    font-size: 14px; line-height: 1.6;
+    color: var(--fg);
+    outline: none;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .ed:empty::before,
+  .ed.is-empty::before{
+    content: attr(data-ph);
+    color: var(--muted-2);
+    pointer-events:none;
+  }
+  .ed .chip{cursor: default}
+
+  .ctools{display:flex; align-items:center; gap: 1px; flex:none}
+  .cbtn{
+    width: 32px; height: 32px; border-radius: 8px;
+    display:grid; place-items:center;
+    color: var(--muted);
+    transition: background .12s ease, color .12s ease;
+  }
+  .cbtn svg{width:16px; height:16px}
+  .cbtn .cletter{font-size:14px; font-weight:600; line-height:1}
+  .cbtn:hover{background: var(--surface-soft); color: var(--fg)}
+  .cbtn.on{background: var(--accent-soft); color: var(--accent-ink)}
+  .cbtn[aria-expanded="true"]{background: var(--surface-soft); color: var(--fg)}
+
+  .csend{
+    width: 34px; height: 34px; border-radius: 9px;
+    display:grid; place-items:center; flex:none;
+    background: var(--track); color: var(--muted-2);
+    transition: background .12s ease, color .12s ease;
+  }
+  .csend svg{width:16px; height:16px}
+  .csend.ready{background: var(--accent-fill); color: white}
+  .csend.ready:hover{background: var(--accent-fill-hover); color: white}
+  .csend.ready:active{transform: translateY(1px)}
+  .csend:disabled{cursor: default}
+
+  .composer-foot{
+    display:flex; align-items:center; gap:10px;
+    padding: 7px 3px 0;
+    min-height: 24px;
+  }
+  .detect{
+    display:inline-flex; align-items:center; gap:7px;
+    min-width:0;
+  }
+  .detect .marker{width:7px;height:7px;border-radius:50%;background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2); flex:none}
+  .detect .dpill{
+    font-family: var(--font-mono); font-size: 11px;
+    padding: 2px 7px; border-radius: 5px;
+    background: var(--accent-soft); color: var(--accent-ink);
+    font-weight:600; letter-spacing:0.2px; flex:none;
+  }
+  .detect .dpill.post{background: var(--post-soft); color: var(--post-ink)}
+  .detect .dpill.image{background: var(--img-soft); color: var(--img-ink)}
+  .detect .dpill.interactive{background: var(--card-soft); color: var(--card-ink)}
+  .detect .why{
+    font-size: 12px; color: var(--muted);
+    overflow:hidden; white-space:nowrap; text-overflow:ellipsis; min-width:0;
+  }
+  .detect .why b{color: var(--fg); font-weight:500}
+  .composer-foot .right{margin-left:auto; display:flex; align-items:center; gap:10px; flex:none; font-size:11.5px; color: var(--muted)}
+  .composer-foot .right .cnt{font-family: var(--font-mono)}
+  .composer-foot .right kbd{
+    font-family: var(--font-mono); font-size: 10.5px;
+    padding: 1px 5px; border:1px solid var(--border); border-radius:4px;
+    background: var(--surface); color: var(--muted);
+  }
+
+  /* 添加菜单（点击输入框内的 ⊕ 弹出，向上展开） */
+  .add-wrap{position:relative; display:inline-flex}
+  .add-menu{
+    position:absolute; bottom: calc(100% + 10px); right: 0;
+    width: 288px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 14px 36px oklch(0.15 0.02 240 / 0.16);
+    padding: 6px; z-index: 95;
+    display:none;
+  }
+  .add-menu.show{display:block; animation: fadeIn .12s ease}
+  .add-menu .am-title{
+    padding: 8px 10px 4px; font-size: 10.5px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600;
+  }
+  .am-item{
+    width:100%; display:grid; grid-template-columns: auto minmax(0,1fr); gap:11px;
+    align-items:center; padding: 9px 10px; border-radius: 9px;
+    text-align:left; color: var(--fg);
+  }
+  .am-item:hover{background: var(--surface-soft)}
+  .am-item .am-ico{
+    width: 32px; height: 32px; border-radius: 9px;
+    display:grid; place-items:center;
+    background: var(--surface-soft); border: 1px solid var(--border);
+    color: var(--muted); flex:none;
+  }
+  .am-item:hover .am-ico{background: var(--accent-soft); border-color: transparent; color: var(--accent-ink)}
+  .am-item .am-ico svg{width:16px;height:16px}
+  .am-item .am-tx{min-width:0}
+  .am-item .am-tx b{display:block; font-size:13px; font-weight:500}
+  .am-item .am-tx span{display:block; font-size:11.5px; color: var(--muted); margin-top:1px}
+
+  /* ============================================================
+     全屏编辑器（点击输入框内的 ↗ 展开至接近全屏）
+     ============================================================ */
+  .expand{
+    position: fixed; inset: 0; z-index: 130;
+    background: oklch(0.2 0.02 240 / 0.32);
+    backdrop-filter: blur(6px);
+    display:none;
+  }
+  .expand.show{display:grid; place-items:center; animation: fadeIn .14s ease}
+  .expand-sheet{
+    width: min(1180px, calc(100vw - 56px));
+    height: min(780px, calc(100vh - 56px));
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 24px 64px oklch(0.15 0.02 240 / 0.24);
+    display:grid; grid-template-rows: auto auto minmax(0,1fr) auto;
+    overflow:hidden;
+    animation: modalIn .18s ease;
+  }
+  .expand-bar{
+    display:flex; align-items:center; gap:2px;
+    padding: 8px 10px 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ebtn{
+    height: 30px; min-width: 30px; padding: 0 8px;
+    border-radius: 7px; display:inline-flex; align-items:center; justify-content:center;
+    color: var(--muted); font-size: 13px; font-weight: 600;
+  }
+  .ebtn svg{width:15px;height:15px}
+  .ebtn:hover{background: var(--surface-soft); color: var(--fg)}
+  .ebtn.on{background: var(--accent-soft); color: var(--accent-ink)}
+  .expand-bar .ebar-sep{width:1px; height:16px; background: var(--border); margin: 0 5px}
+  .expand-bar .ebar-right{margin-left:auto; display:flex; align-items:center; gap:4px}
+  .expand-bar .ebar-right .etip{font-size:11.5px; color: var(--muted); margin-right:6px}
+  .expand-head{padding: 0 26px}
+  .expand-title{
+    width:100%; border:none; outline:none; background:transparent;
+    padding: 16px 0 10px;
+    font-size: 19px; font-weight: 600; color: var(--fg);
+    border-bottom: 1px solid var(--border);
+  }
+  .expand-title::placeholder{color: var(--muted-2); font-weight:500}
+  .expand-ed{
+    overflow-y:auto; padding: 16px 26px 24px;
+    font-size: 14.5px; line-height: 1.8; color: var(--fg);
+    outline:none; word-break: break-word; white-space: pre-wrap;
+  }
+  .expand-ed.is-empty::before{content: attr(data-ph); color: var(--muted-2); pointer-events:none}
+  .expand-foot{
+    display:flex; align-items:center; gap:6px;
+    padding: 9px 14px 9px 18px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-soft);
+  }
+  .expand-foot .ef-hint{margin-left:auto; font-size:11.5px; color: var(--muted); display:flex; align-items:center; gap:8px}
+  .expand-foot .ef-hint kbd{
+    font-family: var(--font-mono); font-size:10.5px; padding: 1px 5px;
+    border:1px solid var(--border); border-radius:4px; background: var(--surface); color: var(--muted);
+  }
+  .expand-foot .csend{width:36px;height:36px}
+
+  /* ============================================================
+     浮层 / 弹窗 —— 沿用 v1 语言
+     ============================================================ */
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes modalIn{from{transform:translateY(6px);opacity:0}to{transform:translateY(0);opacity:1}}
+  @keyframes slideDown{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes pulse{50%{opacity:.35}}
+
+  .overlay{
+    position: fixed; inset: 0;
+    background: oklch(0.2 0.02 240 / 0.32);
+    backdrop-filter: blur(6px);
+    display:none; align-items:center; justify-content:center;
+    z-index: 100;
+  }
+  .overlay.show{display:flex; animation: fadeIn .16s ease}
+
+  .modal{
+    width: 780px; max-width: calc(100vw - 40px);
+    max-height: 84vh;
+    background: var(--surface);
+    border-radius: 16px;
+    box-shadow: 0 24px 64px oklch(0.15 0.02 240 / 0.22), 0 2px 8px oklch(0.15 0.02 240 / 0.06);
+    display:grid; grid-template-rows: auto minmax(0,1fr) auto;
+    overflow:hidden; border: 1px solid var(--border);
+    animation: modalIn .18s ease;
+  }
+  .modal.tiny{width: 420px}
+  .modal > header{display:flex; align-items:center; gap:10px; padding: 14px 18px 14px 20px; border-bottom: 1px solid var(--border)}
+  .modal > header .m-title{display:flex;align-items:center;gap:10px}
+  .modal > header .m-title svg{width:16px;height:16px;color:var(--muted)}
+  .modal > header h2{margin:0; font-size:14.5px; font-weight:600}
+  .modal > header .close{margin-left:auto; width:30px; height:30px; border-radius:8px; display:grid; place-items:center; color: var(--muted)}
+  .modal > header .close:hover{background: var(--surface-soft); color: var(--fg)}
+  .modal > footer{
+    display:flex; align-items:center; gap:10px;
+    padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-soft);
+  }
+  .modal > footer .left{display:flex;align-items:center;gap:6px; color: var(--muted); font-size:12px}
+  .modal > footer .left svg{width:12px;height:12px}
+  .modal > footer .spacer{flex:1}
+
+  .modal .body{display:grid; grid-template-columns: 180px minmax(0,1fr); min-height:0}
+  .modal .body.single{grid-template-columns: minmax(0,1fr)}
+  .modal .body .nav{border-right:1px solid var(--border); background: var(--surface-soft); padding: 12px 8px; display:flex; flex-direction:column; gap:2px; overflow-y:auto}
+  .modal .body .nav button{display:flex; align-items:center; gap:10px; padding: 8px 10px; border-radius:8px; color: var(--muted); font-size:13px; text-align:left; width:100%}
+  .modal .body .nav button:hover{background: oklch(0.94 0.01 220); color: var(--fg)}
+  .modal .body .nav button.active{background: var(--surface); color: var(--fg); font-weight:500; box-shadow: 0 1px 2px oklch(0.15 0.02 240 / 0.06), 0 0 0 1px var(--border)}
+  .modal .body .nav button svg{width:14px;height:14px;color:currentColor}
+  .modal .body .nav .group-title{padding: 12px 10px 4px; font-size:10.5px; letter-spacing:0.6px; text-transform:uppercase; color: var(--muted)}
+  .modal .body .pane{padding: 22px 26px 26px; overflow-y:auto}
+  .modal .pane{display:none}
+  .modal .pane.active{display:block}
+
+  .pane h3{margin:0 0 4px; font-size:14.5px; font-weight:600}
+  .pane .desc{color: var(--muted); font-size:12.5px; margin-bottom:20px; line-height:1.7}
+  .pane .field{margin-bottom:16px}
+  .pane .field-head{display:flex; align-items:center; gap:6px; font-size:12.5px; color: var(--muted); margin-bottom:6px}
+  .pane .field-head b{color: var(--fg); font-weight:500}
+  .pane .field-head .req{color: var(--danger)}
+  .pane .field-head .toggle{margin-left:auto; color: var(--accent-ink); font-size:12px; padding: 2px 4px}
+  .pane .field-head .toggle:hover{text-decoration:underline}
+  .pane input[type=text], .pane input[type=password]{
+    width:100%; padding: 10px 12px;
+    border:1px solid var(--border); border-radius:9px;
+    background: var(--surface); font-size:13px; font-family: var(--font-mono);
+    color: var(--fg); outline:none;
+    transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .pane input:focus{border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2)}
+  .pane .field .field-hint{margin-top:6px; font-size:11.5px; color: var(--muted); line-height:1.65}
+  .pane .field .field-hint a{color: var(--accent-ink)}
+  .pane .field .field-hint a:hover{text-decoration:underline}
+  .pane code{font-family: var(--font-mono); font-size:11.5px; background: var(--surface-soft); padding:1px 5px; border-radius:4px; border:1px solid var(--border)}
+
+  .btn-secondary{
+    padding: 8px 14px; border:1px solid var(--border); border-radius:9px;
+    background: var(--surface); font-size:13px; color: var(--fg);
+    display:inline-flex; align-items:center; gap:6px;
+    transition: border-color .1s ease;
+  }
+  .btn-secondary:hover{border-color: var(--border-strong)}
+  .btn-secondary svg{width:13px;height:13px}
+  .btn-primary{
+    padding: 8px 16px; border-radius:9px;
+    background: var(--accent-fill); color: white; font-size:13px; font-weight:500;
+    box-shadow: 0 2px 6px oklch(0.6 0.1 175 / 0.25);
+  }
+  .btn-primary:hover{background: var(--accent-fill-hover); color:white}
+  .btn-danger{
+    padding: 7px 13px; border-radius:8px; font-size:12.5px;
+    border:1px solid oklch(0.86 0.1 25); background: var(--surface); color: var(--danger);
+  }
+  .btn-danger:hover{background: oklch(0.985 0.022 25); border-color: var(--danger)}
+  .btn-link{color: var(--accent-ink); font-size:12.5px; padding: 8px 2px; display:inline-flex; align-items:center; gap:4px}
+  .btn-link:hover{text-decoration:underline}
+
+  /* 权限体检卡 —— 三段各自承载一种语义：头部=连接事实（中性面），
+     清单=每个作用域的独立状态（状态色只给状态徽标），底部=待处理事项（警示色带）。
+     成功色不再铺满整块，缺失项也就不再被淹没。 */
+  .status-card{
+    margin: 18px 0 4px; border-radius:12px; overflow:hidden;
+    background: var(--surface); border:1px solid var(--border);
+  }
+  .sc-head{
+    display:flex; align-items:center; gap:8px; padding: 9px 14px;
+    background: var(--surface-soft); border-bottom:1px solid var(--border);
+  }
+  .sc-tick{
+    width:16px; height:16px; border-radius:50%; flex:none;
+    display:grid; place-items:center;
+    background: oklch(0.93 0.055 155); color: oklch(0.42 0.11 155);
+  }
+  .sc-tick svg{width:10px;height:10px}
+  .sc-head b{font-size:12.5px; font-weight:600; color: var(--fg)}
+  .sc-count{
+    font-family: var(--font-mono); font-size:11px; color: oklch(0.42 0.012 240);
+    font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius:5px;
+    background: var(--track);
+  }
+  .sc-count.warn{background: oklch(0.96 0.06 75); color: oklch(0.45 0.13 75); font-weight:500}
+  .sc-time{margin-left:auto; font-size:11px; color: var(--muted); font-variant-numeric: tabular-nums}
+
+  .scope-list{list-style:none; margin:0; padding: 4px 14px 5px}
+  .scope{
+    display:grid; grid-template-columns: minmax(0,1fr) 74px; align-items:center;
+    gap:12px; padding: 8.5px 0; border-bottom:1px solid var(--border);
+  }
+  .scope:last-child{border-bottom:none}
+  .scope-name{display:flex; align-items:baseline; gap:7px; min-width:0}
+  .scope-list .scope-code{
+    font-family: var(--font-mono); font-size:11.5px; color: var(--fg);
+    background:none; border:none; padding:0;
+    line-height:1.5; overflow-wrap:anywhere;
+  }
+  .scope-note{font-size:11px; color: var(--muted); flex:none}
+  .sbadge{
+    width:100%; text-align:center; padding: 3px 0; border-radius:999px;
+    font-size:11px; font-weight:500; line-height:1.45;
+  }
+  .sbadge.ok{background: oklch(0.94 0.05 155); color: oklch(0.42 0.1 155)}
+  .sbadge.neutral{background: var(--track); color: oklch(0.42 0.012 240)}
+  .sbadge.warn{background: oklch(0.96 0.06 75); color: oklch(0.45 0.13 75)}
+
+  .sc-issue{
+    display:grid; gap:5px; padding: 12px 14px 13px;
+    background: oklch(0.985 0.035 75); border-top:1px solid oklch(0.87 0.09 75);
+  }
+  .sc-issue .issue-head{
+    display:flex; align-items:center; gap:7px;
+    font-size:12.5px; font-weight:600; color: oklch(0.34 0.11 75);
+  }
+  .sc-issue .issue-head svg{width:14px;height:14px;flex:none}
+  .sc-issue p{margin:0; font-size:12px; line-height:1.7; color: oklch(0.45 0.1 75)}
+  .sc-issue code{
+    background: oklch(1 0 0 / 0.75); border-color: oklch(0.87 0.09 75);
+    color: oklch(0.36 0.12 75);
+  }
+  .sc-issue .action-row{margin-top:7px}
+  .action-row{display:flex; gap:8px; margin-top:18px; align-items:center; flex-wrap:wrap}
+
+  .pane .pane-title-row{display:flex; align-items:baseline; gap:12px; margin-bottom:4px}
+  .pane .pane-title-row h3{margin:0}
+  .pane .pane-title-row .pane-title-link{margin-left:auto; color: var(--muted); font-size:12px}
+  .pane .pane-title-row .pane-title-link:hover{color: var(--accent-ink); text-decoration:underline}
+
+  .agent-card{border:1px solid var(--border); border-radius:12px; background: var(--surface); margin-bottom:14px; overflow:hidden}
+  .agent-card-head{display:grid; grid-template-columns: auto minmax(0,1fr) auto; gap:14px; align-items:center; padding: 14px 16px}
+  .agent-ico{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background: var(--surface-soft); border:1px solid var(--border); color: var(--fg)}
+  .agent-ico svg{width:18px;height:18px}
+  .agent-ico.cli{background: oklch(0.24 0.02 240); color: oklch(0.85 0.09 155); border-color: transparent; font-family: var(--font-mono); font-weight:600; font-size:13px}
+  .agent-ico.skill{background: var(--accent-soft); color: var(--accent-ink); border-color: transparent}
+  .agent-meta{min-width:0}
+  .agent-meta b{display:block; font-size:13.5px; font-weight:600; color: var(--fg)}
+  .agent-meta b code{font-family: var(--font-mono); font-size:12px; font-weight:500; padding:1px 5px; border-radius:4px; background: var(--surface-soft); color: var(--muted); margin-left:6px; border:1px solid var(--border)}
+  .agent-meta span{display:block; font-size:12px; color: var(--muted); margin-top:2px}
+  .agent-card-cta{display:flex; align-items:center; gap:10px; flex:none}
+  .agent-status{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; padding: 4px 9px; border-radius:999px; background: oklch(0.94 0.05 155); color: var(--ok); font-weight:500; flex:none}
+  .agent-status svg{width:12px;height:12px}
+  .agent-btn{padding: 5px 12px; font-size:12.5px; border-radius:7px; border:1px solid var(--border); background: var(--surface); color: var(--muted); transition: color .1s ease, border-color .1s ease}
+  .agent-btn:hover{color: var(--fg); border-color: var(--border-strong)}
+  .agent-btn.primary{background: var(--accent-fill); color: white; border-color: var(--accent-fill); font-weight:500}
+  .agent-btn.primary:hover{background: var(--accent-fill-hover); color:white; border-color: var(--accent-fill-hover)}
+  .agent-card:not(.installed) .installed-only{display:none}
+  .agent-card.installed .not-installed-only{display:none}
+
+  .pref-section{margin-bottom:22px}
+  .pref-section:last-child{margin-bottom:0}
+  .pref-section h4{margin:0 0 10px; font-size:11px; color: var(--muted); text-transform:uppercase; letter-spacing:0.6px; font-weight:600}
+  .theme-grid{display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:10px}
+  .theme-card{cursor:pointer; border:2px solid var(--border); border-radius:12px; padding:8px; background: var(--surface); display:flex; flex-direction:column; gap:8px; transition: border-color .12s ease, box-shadow .12s ease}
+  .theme-card:hover{border-color: var(--border-strong)}
+  .theme-card.active{border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2)}
+  .theme-card .prv{height:74px; border-radius:8px; position:relative; overflow:hidden; border:1px solid var(--border)}
+  .theme-card .prv.light{background: var(--prv-light)}
+  .theme-card .prv.dark{background: var(--prv-dark); border-color: var(--prv-dark-line)}
+  .theme-card .prv.auto{background: linear-gradient(115deg, var(--prv-light) 50%, var(--prv-dark) 50%)}
+  .theme-card .prv .header-bar{position:absolute; top:6px; left:6px; right:6px; height:10px; border-radius:3px}
+  .theme-card .prv.light .header-bar{background: var(--prv-light-card); box-shadow:0 0 0 1px var(--prv-light-line)}
+  .theme-card .prv.dark .header-bar{background: var(--prv-dark-bar)}
+  .theme-card .prv.auto .header-bar{background: linear-gradient(115deg, var(--prv-light-card) 50%, var(--prv-dark-bar) 50%)}
+  .theme-card .prv .body-bar{position:absolute; top:22px; left:6px; right:6px; height:32px; border-radius:4px}
+  .theme-card .prv.light .body-bar{background: var(--prv-light-card); box-shadow:0 0 0 1px var(--prv-light-line)}
+  .theme-card .prv.dark .body-bar{background: var(--prv-dark-body)}
+  .theme-card .prv.auto .body-bar{background: linear-gradient(115deg, var(--prv-light-card) 50%, var(--prv-dark-body) 50%)}
+  .theme-card .prv .accent-btn{position:absolute; bottom:6px; left:6px; width:22px; height:8px; border-radius:3px; background: var(--accent)}
+  .theme-card .lbl{display:flex; align-items:center; gap:8px; padding: 2px 2px 2px 4px; font-size:12.5px}
+  .theme-card .lbl b{font-weight:500; color: var(--fg)}
+  .theme-card .lbl .sub{color: var(--muted); font-size:11px; margin-left:auto}
+  .theme-card .radio{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--border-strong); position:relative; flex:none}
+  .theme-card.active .radio{border-color: var(--accent); background: var(--accent)}
+  .theme-card.active .radio::after{content:''; position:absolute; top:3px; left:3px; width:5px; height:5px; border-radius:50%; background:white}
+
+  .pref-row{display:flex; align-items:center; gap:14px; padding:12px 0; border-bottom:1px solid var(--border)}
+  .pref-row:last-child{border-bottom:none; padding-bottom:2px}
+  .pref-row .rlbl{flex:1; min-width:0}
+  .pref-row .rlbl b{font-weight:500; font-size:13px; color: var(--fg); display:block}
+  .pref-row .rlbl span{color: var(--muted); font-size:11.5px}
+  .pref-seg{display:inline-flex; background: var(--surface-soft); border-radius:8px; padding:2px; border:1px solid var(--border); flex:none}
+  .pref-seg button{padding: 4px 10px; font-size:12px; border-radius:6px; color: var(--muted)}
+  .pref-seg button.active{background: var(--surface); color: var(--fg); font-weight:500; box-shadow: 0 0 0 1px var(--border), 0 1px 2px oklch(0.15 0.02 240 / 0.06)}
+  .pref-seg button:hover:not(.active){color: var(--fg)}
+  .switch{width:36px;height:20px;border-radius:12px;background: var(--border-strong); position:relative; flex:none; transition: background .16s ease}
+  .switch::after{content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:white; box-shadow:0 1px 2px oklch(0.2 0.02 240 / 0.2); transition: transform .16s ease}
+  .switch.on{background: var(--accent)}
+  .switch.on::after{transform: translateX(16px)}
+
+  .about-hero{display:flex; flex-direction:column; align-items:center; text-align:center; padding: 4px 0 18px; border-bottom:1px solid var(--border); margin-bottom:18px}
+  .about-hero .logo-lg{width:56px;height:56px;border-radius:14px;background: radial-gradient(120% 120% at 20% 15%, oklch(0.7 0.13 175) 0%, var(--accent) 50%, oklch(0.5 0.09 175) 100%); display:grid; place-items:center; color:white; box-shadow: inset 0 -3px 6px oklch(0.35 0.06 175 / 0.35); margin-bottom:12px}
+  .about-hero .logo-lg svg{width:28px;height:28px}
+  .about-hero .name{margin:0; font-size:17px; font-weight:600}
+  .about-hero .ver{font-family: var(--font-mono); font-size:11.5px; color: var(--muted); margin-top:4px}
+  .about-hero .quote{margin-top:12px; font-size:13px; color: var(--muted); font-family: Georgia, "Songti SC", STSong, serif; font-style:italic}
+  .about-meta{display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:16px}
+  .about-meta .item{padding: 10px 12px; border:1px solid var(--border); border-radius:9px; background: var(--surface-soft)}
+  .about-meta .item b{display:block; color: var(--muted); font-size:10.5px; font-weight:500; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px}
+  .about-meta .item span{color: var(--fg); font-family: var(--font-mono); font-size:12px}
+  .about-links{display:flex; flex-wrap:wrap; gap: 6px 18px; padding-top:4px; border-top:1px dashed var(--border)}
+  .about-links a{color: var(--accent-ink); font-size:12.5px}
+  .about-links a:hover{text-decoration:underline}
+
+  .bot-list{margin-top:6px; border:1px solid var(--border); border-radius:10px; overflow:hidden}
+  .bot-list-item{border-bottom:1px solid var(--border); background: var(--surface)}
+  .bot-list-item:last-child{border-bottom:none}
+  .bot-list-item.editing, .bot-list-item.confirming-delete{background: var(--surface-soft)}
+  .bot-list-head{display:grid; grid-template-columns: auto minmax(0,1fr) auto; gap:12px; padding: 12px 14px; align-items:center}
+  .bot-list-item .avt{width:34px;height:34px;border-radius:9px;background: linear-gradient(135deg, var(--accent), oklch(0.5 0.09 175)); color:white; display:grid; place-items:center; font-size:12px; font-weight:600}
+  .bot-list-item .avt.alt{background: linear-gradient(135deg, oklch(0.7 0.13 260), oklch(0.5 0.15 260))}
+  .bot-list-item .avt.warn{background: linear-gradient(135deg, oklch(0.75 0.13 75), oklch(0.55 0.15 55))}
+  .bot-list-item .meta{min-width:0}
+  .bot-list-item .meta b{display:block; font-size:13px; font-weight:500}
+  .bot-list-item .meta .row{display:flex; align-items:center; gap:8px; margin-top:2px; flex-wrap:wrap}
+  .bot-list-item .meta span{font-size:11.5px; color: var(--muted); font-family: var(--font-mono); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .bot-list-item .meta .tag{font-family: var(--font-sans); font-size:10.5px; padding:1px 6px; border-radius:4px}
+  .bot-list-item .meta .tag.ok{background: oklch(0.94 0.05 155); color: var(--ok)}
+  .bot-list-item .meta .tag.warn{background: oklch(0.96 0.06 75); color: oklch(0.5 0.13 75)}
+  .bot-list-item .acts{display:flex; gap:4px}
+  .bot-list-item .acts button{padding: 4px 10px; font-size:12px; border-radius:6px; border:1px solid var(--border); background: var(--surface); color: var(--muted)}
+  .bot-list-item .acts button:hover{color: var(--fg); border-color: var(--border-strong)}
+  .bot-list-item .acts button.danger:hover{color: var(--danger); border-color: oklch(0.85 0.1 25); background: oklch(0.99 0.02 25)}
+  .bot-list-edit, .bot-list-confirm{display:none}
+  .bot-list-item.editing .bot-list-edit{display:block}
+  .bot-list-item.confirming-delete .bot-list-confirm{display:flex}
+  .bot-list-edit{padding: 4px 14px 14px 60px; border-top:1px dashed var(--border); animation: slideDown .16s ease}
+  .bot-list-edit .edit-grid{display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin: 10px 0}
+  .bot-list-edit .edit-grid input{padding: 8px 11px; font-size:12.5px; border:1px solid var(--border); border-radius:8px; background: var(--surface); color: var(--fg); outline:none; transition: border-color .12s ease, box-shadow .12s ease}
+  .bot-list-edit .edit-grid input.full{grid-column: 1 / -1; font-family: var(--font-mono); font-size:12px}
+  .bot-list-edit .edit-grid input:focus{border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2)}
+  .bot-list-edit .edit-actions{display:flex; align-items:center; gap:8px}
+  .bot-list-edit .edit-actions .edit-hint{flex:1; color: var(--muted); font-size:11px}
+  .bot-list-edit .edit-actions button{padding: 6px 12px; font-size:12px; border-radius:7px; border:1px solid var(--border); background: var(--surface); color: var(--fg)}
+  .bot-list-edit .edit-actions button:hover{border-color: var(--border-strong)}
+  .bot-list-edit .edit-actions button.primary{background: var(--accent-fill); color:white; border-color: var(--accent-fill); font-weight:500}
+  .bot-list-edit .edit-actions button.primary:hover{background: var(--accent-fill-hover); color:white; border-color: var(--accent-fill-hover)}
+  .bot-list-confirm{padding: 10px 14px 12px 60px; border-top:1px dashed oklch(0.85 0.1 25); background: oklch(0.98 0.03 25); align-items:center; gap:12px; font-size:12.5px; animation: slideDown .16s ease}
+  .bot-list-item.confirming-delete{background: oklch(0.98 0.03 25)}
+  .bot-list-confirm .msg{flex:1; color: oklch(0.42 0.14 25)}
+  .bot-list-confirm .msg b{color: oklch(0.36 0.16 25); font-weight:600}
+  .bot-list-confirm button{padding: 6px 12px; font-size:12px; border-radius:7px; border:1px solid var(--border); background: var(--surface); color: var(--fg)}
+  .bot-list-confirm button:hover{border-color: var(--border-strong)}
+  .bot-list-confirm button.danger{background: var(--danger); color:white; border-color: var(--danger); font-weight:500}
+  .bot-list-confirm button.danger:hover{background: oklch(0.43 0.19 25); color:white; border-color: oklch(0.43 0.19 25)}
+  .add-bot-form{display:grid; grid-template-columns: 1fr 1fr; gap:10px; padding:14px; border:1px dashed var(--border-strong); border-radius:10px; background: var(--surface-soft); margin-top:12px}
+  .add-bot-form input{padding: 9px 12px; border:1px solid var(--border); border-radius:8px; background: var(--surface); font-size:13px; outline:none; color: var(--fg)}
+  .add-bot-form input:focus{border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2)}
+  .add-bot-form input.full{grid-column: 1 / -1; font-family: var(--font-mono); font-size:12px}
+  .add-bot-form .foot{grid-column: 1 / -1; display:flex; align-items:center; gap:12px; color: var(--muted); font-size:11.5px}
+  .add-bot-form .foot .spacer{flex:1}
+
+  .port-row{display:flex; align-items:flex-end; gap:10px}
+  .port-row .pf{flex: 0 0 132px}
+  .port-row .pf input{width:100%}
+  .port-row .pnow{flex:1; min-width:0; padding: 9px 12px; border-radius:9px; border:1px solid var(--border); background: var(--surface-soft); font-size:12.5px; display:flex; align-items:center; gap:8px}
+  .port-row .pnow .sdot{width:7px;height:7px;border-radius:50%;flex:none;background: var(--ok); box-shadow: 0 0 0 3px oklch(0.63 0.12 155 / 0.16)}
+  .port-row .pnow code{font-family: var(--font-mono); font-size:12px; color: var(--fg); background:none; border:none; padding:0}
+  .port-row .pnow .plbl{color: var(--muted); white-space:nowrap}
+  .port-row .pnow.err{border-color: oklch(0.86 0.1 25); background: oklch(0.985 0.022 25)}
+  .port-row .pnow.err .sdot{background: var(--danger); box-shadow: 0 0 0 3px oklch(0.58 0.18 25 / 0.16)}
+  .port-row .pnow.err code{color: var(--danger)}
+  .port-row .pnow.err .plbl{color: oklch(0.48 0.16 25)}
+  .dir-row{display:flex; align-items:center; gap:8px}
+  .dir-row .dpath{flex:1; min-width:0; padding: 9px 12px; border:1px solid var(--border); border-radius:9px; background: var(--surface-soft); font-family: var(--font-mono); font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  .key-card{border:1px solid var(--border); border-radius:12px; overflow:hidden; background: var(--surface)}
+  .key-head{display:grid; grid-template-columns: auto minmax(0,1fr) auto; gap:12px; align-items:center; padding:14px 16px}
+  .key-head .kico{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background: var(--accent-soft); color: var(--accent-ink)}
+  .key-head .kico svg{width:17px;height:17px}
+  .key-head .kmeta{min-width:0}
+  .key-head .kmeta b{display:block; font-size:13.5px; font-weight:600}
+  .key-head .kmeta .krow{display:flex; flex-wrap:wrap; align-items:center; gap: 4px 10px; margin-top:3px; font-size:11.5px; color: var(--muted)}
+  .key-head .kmeta .kid{font-family: var(--font-mono); font-size:11.5px; padding:1px 6px; border-radius:4px; background: var(--surface-soft); color: var(--fg); border:1px solid var(--border)}
+  .key-head .kacts{display:flex; gap:6px; flex:none}
+  .key-slot{display:none; padding: 0 16px 16px; border-top:1px dashed var(--border); animation: slideDown .16s ease}
+  .key-card[data-slot="export"] .key-slot-export,
+  .key-card[data-slot="import"] .key-slot-import,
+  .key-card[data-slot="rotate"] .key-slot-rotate{display:block}
+  .key-slot h5{margin: 14px 0 6px; font-size:12.5px; font-weight:600}
+  .key-slot p{margin: 0 0 10px; font-size:12px; color: var(--muted); line-height:1.65}
+  .key-reveal{display:flex; align-items:center; gap:8px}
+  .key-reveal code{flex:1; min-width:0; padding: 9px 12px; border:1px solid var(--border); border-radius:9px; background: var(--surface-soft); font-family: var(--font-mono); font-size:12px; letter-spacing:0.4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color: var(--fg); border-width:1px}
+  .key-reveal code.masked{color: var(--muted-2); letter-spacing:1.5px}
+  .key-slot input[type=text]{width:100%}
+  .fp-match{display:flex; align-items:center; gap:8px; margin-top:10px; padding: 9px 12px; border-radius:9px; border:1px solid oklch(0.88 0.05 155); background: oklch(0.975 0.028 155); font-size:12px; color: oklch(0.35 0.08 155)}
+  .fp-match svg{width:13px;height:13px;flex:none}
+  .fp-match code{background: oklch(1 0 0 / 0.55); padding:1px 5px; border-radius:4px}
+  .fp-match.bad{border-color: oklch(0.86 0.1 25); background: oklch(0.985 0.022 25); color: oklch(0.44 0.15 25)}
+
+  .warn-note{display:flex; align-items:flex-start; gap:9px; margin-top:14px; padding: 11px 13px; border-radius:10px; border:1px solid oklch(0.87 0.09 75); background: oklch(0.985 0.035 75); font-size:12px; color: oklch(0.42 0.12 75); line-height:1.65}
+  .warn-note svg{width:14px;height:14px;flex:none; margin-top:2px}
+  .warn-note b{font-weight:600}
+  .e2e-note{display:flex; align-items:flex-start; gap:9px; margin-top:14px; padding: 11px 13px; border-radius:10px; border:1px solid var(--accent-soft-2); background: var(--accent-soft); font-size:12px; color: var(--accent-ink); line-height:1.65}
+  .e2e-note svg{width:14px;height:14px;flex:none; margin-top:2px}
+
+  /* ============================================================
+     发送文件确认弹窗（对应飞书「无法添加该类型的内容到输入框」）
+     ============================================================ */
+  .confirm-body{padding: 20px 22px 22px}
+  .confirm-note{
+    display:flex; align-items:flex-start; gap:8px;
+    margin-bottom: 14px;
+    font-size: 12.5px; line-height:1.65;
+    color: oklch(0.5 0.13 45);
+  }
+  .confirm-note svg{width:14px;height:14px;flex:none;margin-top:2px;color: oklch(0.65 0.15 55)}
+  .confirm-file{
+    display:grid; grid-template-columns: auto minmax(0,1fr); gap: 11px; align-items:center;
+    padding: 11px 12px; border:1px solid var(--border); border-radius:10px;
+    background: var(--surface-soft);
+  }
+  .confirm-file .cico{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;background: var(--surface); border:1px solid var(--border); color: var(--muted)}
+  .confirm-file .cico svg{width:17px;height:17px}
+  .confirm-file .cinfo{min-width:0}
+  .confirm-file .cinfo b{display:block; font-size:13px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .confirm-file .cinfo span{display:block; font-family: var(--font-mono); font-size:11.5px; color: var(--muted); margin-top:2px}
+  .confirm-body .e2e-note{margin-top: 14px}
+
+  /* ============================================================
+     Toast / 取回链接浮层 / 拖拽遮罩
+     ============================================================ */
+  .toast{
+    position: fixed; top: 58px; left: 50%; transform: translateX(-50%) translateY(-6px);
+    display:flex; align-items:center; gap:10px;
+    padding: 9px 15px;
+    background: var(--surface);
+    border:1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px oklch(0.15 0.02 240 / 0.16);
+    font-size: 12.5px; color: var(--fg);
+    z-index: 150;
+    opacity:0; pointer-events:none;
+    transition: opacity .16s ease, transform .16s ease;
+  }
+  .toast.show{opacity:1; transform: translateX(-50%) translateY(0)}
+  .toast .tdot{width:7px;height:7px;border-radius:50%;background: var(--ok); flex:none}
+  .toast.err .tdot{background: var(--danger)}
+  .toast code{font-family: var(--font-mono); font-size:11.5px; color: var(--muted)}
+
+  .pop-wrap{position:relative; display:inline-flex}
+  .popover{
+    position:absolute; top: calc(100% + 8px); right: 0;
+    width: 344px;
+    background: var(--surface);
+    border:1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 14px 36px oklch(0.15 0.02 240 / 0.16);
+    padding: 14px; z-index: 95; display:none;
+  }
+  .popover.show{display:block; animation: fadeIn .12s ease}
+  .popover label{display:block; font-size:11.5px; color: var(--muted); margin-bottom:6px}
+  .popover .prow{display:flex; gap:6px}
+  .popover input{
+    flex:1; min-width:0; padding: 8px 10px;
+    border:1px solid var(--border); border-radius:8px;
+    background: var(--surface); font-family: var(--font-mono); font-size:11.5px;
+    color: var(--fg); outline:none;
+  }
+  .popover input:focus{border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2)}
+  .popover .pgo{flex:none; padding: 0 12px; border-radius:8px; font-size:12px; border:1px solid var(--border); background: var(--surface-soft); color: var(--fg)}
+  .popover .pgo:hover{border-color: var(--border-strong)}
+  .popover .phint{margin: 8px 0 0; font-size:11px; color: var(--muted); line-height:1.65}
+  .popover .phint.bad{color: var(--danger)}
+
+  .dropzone{
+    position: fixed; inset: 0; z-index: 140;
+    display:none; align-items:center; justify-content:center;
+    background: oklch(0.2 0.02 240 / 0.34);
+    backdrop-filter: blur(6px);
+  }
+  .dropzone.show{display:flex; animation: fadeIn .16s ease}
+  .dropzone .dz-card{
+    width: 420px; max-width: calc(100vw - 64px);
+    padding: 34px 28px; border-radius:18px;
+    border: 2px dashed var(--accent);
+    background: var(--surface);
+    box-shadow: 0 24px 64px oklch(0.15 0.02 240 / 0.24);
+    text-align:center;
+    animation: modalIn .18s ease;
+  }
+  .dropzone .dz-ico{width:52px;height:52px;margin: 0 auto 14px; border-radius:14px; display:grid; place-items:center; background: var(--accent-soft); color: var(--accent-ink)}
+  .dropzone .dz-ico svg{width:24px;height:24px}
+  .dropzone b{display:block; font-size:15px; font-weight:600}
+  .dropzone span{display:block; margin-top:6px; font-size:12.5px; color: var(--muted); line-height:1.7}
+
+  /* ============================================================
+     暗色主题 —— 覆盖，不改动上方任何规则
+     ============================================================ */
+  html[data-theme="dark"]{
+    --bg: oklch(0.18 0.012 240);
+    --surface: oklch(0.22 0.015 240);
+    --surface-soft: oklch(0.255 0.015 240);
+    --fg: oklch(0.95 0.005 220);
+    --muted: oklch(0.68 0.012 240);
+    --muted-2: oklch(0.5 0.012 240);
+    --border: oklch(0.3 0.012 240);
+    --border-strong: oklch(0.4 0.014 240);
+    --accent: oklch(0.72 0.11 175);
+    --accent-ink: oklch(0.82 0.1 175);
+    --accent-soft: oklch(0.32 0.055 175);
+    --accent-soft-2: oklch(0.35 0.055 175 / 0.5);
+    --accent-fill: oklch(0.58 0.108 175);
+    --accent-fill-hover: oklch(0.52 0.108 175);
+    --danger: oklch(0.72 0.16 25);
+    --warn: oklch(0.8 0.14 75);
+    --ok: oklch(0.78 0.12 155);
+    --up: oklch(0.72 0.11 175);
+    --up-ink: oklch(0.82 0.1 175);
+    --up-soft: oklch(0.32 0.055 175);
+    --down: oklch(0.74 0.12 265);
+    --down-ink: oklch(0.86 0.11 265);
+    --down-soft: oklch(0.3 0.07 265);
+    --post-soft: oklch(0.3 0.07 265);
+    --post-ink: oklch(0.86 0.11 265);
+    --img-soft: oklch(0.28 0.06 130);
+    --img-ink: oklch(0.86 0.11 130);
+    --card-soft: oklch(0.3 0.08 45);
+    --card-ink: oklch(0.86 0.12 45);
+    --track: oklch(0.305 0.012 240);
+    --shadow-sm: 0 1px 0 oklch(0 0 0 / 0.4), 0 1px 2px oklch(0 0 0 / 0.3);
+    --shadow-md: 0 1px 0 oklch(0 0 0 / 0.4), 0 12px 32px oklch(0 0 0 / 0.4);
+    color-scheme: dark;
+  }
+  html[data-theme="dark"] .titlebar{background: linear-gradient(180deg, oklch(0.22 0.012 240), oklch(0.2 0.012 240))}
+  html[data-theme="dark"] .composer{background: linear-gradient(180deg, oklch(0.18 0.012 240 / 0.4), var(--bg))}
+  html[data-theme="dark"] .btn-ghost:hover{background: oklch(0.28 0.015 240)}
+  html[data-theme="dark"] .modal .body .nav button:hover{background: oklch(0.28 0.015 240); color: var(--fg)}
+  html[data-theme="dark"] .overlay,
+  html[data-theme="dark"] .expand,
+  html[data-theme="dark"] .dropzone{background: oklch(0 0 0 / 0.55)}
+  html[data-theme="dark"] .bot-menu,
+  html[data-theme="dark"] .add-menu,
+  html[data-theme="dark"] .popover,
+  html[data-theme="dark"] .expand-sheet,
+  html[data-theme="dark"] .modal,
+  html[data-theme="dark"] .toast{box-shadow: 0 24px 64px oklch(0 0 0 / 0.55), 0 2px 8px oklch(0 0 0 / 0.35)}
+  html[data-theme="dark"] .msg-acts button:hover{background: oklch(0.28 0.015 240)}
+  html[data-theme="dark"] .cbtn:hover{background: oklch(0.28 0.015 240)}
+  html[data-theme="dark"] .chat-act:hover{background: oklch(0.26 0.015 240); border-color: var(--border)}
+  html[data-theme="dark"] .chat-act.danger:hover,
+  html[data-theme="dark"] .chat-act.confirming{background: oklch(0.28 0.075 25); border-color: oklch(0.5 0.14 25)}
+  html[data-theme="dark"] .pane .field-head .toggle{color: var(--accent-ink)}
+  html[data-theme="dark"] .sc-tick{background: oklch(0.3 0.055 155); color: oklch(0.9 0.09 155)}
+  html[data-theme="dark"] .sc-count{color: oklch(0.8 0.012 240)}
+  html[data-theme="dark"] .sc-count.warn{background: oklch(0.32 0.08 75); color: oklch(0.9 0.12 75)}
+  html[data-theme="dark"] .sbadge.ok{background: oklch(0.3 0.055 155); color: oklch(0.9 0.09 155)}
+  html[data-theme="dark"] .sbadge.neutral{background: var(--track); color: oklch(0.8 0.012 240)}
+  html[data-theme="dark"] .sbadge.warn{background: oklch(0.32 0.08 75); color: oklch(0.92 0.11 75)}
+  html[data-theme="dark"] .sc-issue{background: oklch(0.275 0.055 75); border-top-color: oklch(0.46 0.1 75)}
+  html[data-theme="dark"] .sc-issue .issue-head{color: oklch(0.94 0.12 75)}
+  html[data-theme="dark"] .sc-issue p{color: oklch(0.82 0.09 75)}
+  html[data-theme="dark"] .sc-issue code{background: oklch(0 0 0 / 0.3); border-color: oklch(0.46 0.1 75); color: oklch(0.94 0.12 75)}
+  html[data-theme="dark"] .agent-status{background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
+  html[data-theme="dark"] .bot-list-item .meta .tag.ok{background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
+  html[data-theme="dark"] .bot-list-item .meta .tag.warn{background: oklch(0.32 0.08 75); color: oklch(0.9 0.12 75)}
+  html[data-theme="dark"] .bot-list-confirm{background: oklch(0.28 0.08 25); border-top-color: oklch(0.5 0.14 25)}
+  html[data-theme="dark"] .bot-list-item.confirming-delete{background: oklch(0.28 0.08 25)}
+  html[data-theme="dark"] .bot-list-confirm .msg{color: oklch(0.88 0.12 25)}
+  html[data-theme="dark"] .bot-list-confirm .msg b{color: oklch(0.95 0.13 25)}
+  html[data-theme="dark"] .pref-seg button.active{box-shadow: 0 0 0 1px var(--border-strong), 0 1px 2px oklch(0 0 0 / 0.3)}
+  html[data-theme="dark"] .warn-note{border-color: oklch(0.52 0.12 75); background: oklch(0.3 0.08 75); color: oklch(0.92 0.11 75)}
+  html[data-theme="dark"] .filecard .fc-ico.fail{background: oklch(0.32 0.09 25); color: oklch(0.86 0.14 25)}
+  html[data-theme="dark"] .confirm-note{color: oklch(0.88 0.11 55)}
+  html[data-theme="dark"] .confirm-note svg{color: oklch(0.85 0.12 65)}
+  html[data-theme="dark"] .fp-match{border-color: oklch(0.4 0.07 155); background: oklch(0.29 0.05 155); color: oklch(0.9 0.1 155)}
+  html[data-theme="dark"] .fp-match code{background: oklch(0 0 0 / 0.25)}
+  html[data-theme="dark"] .fp-match.bad{border-color: oklch(0.5 0.14 25); background: oklch(0.28 0.075 25); color: oklch(0.9 0.12 25)}
+  html[data-theme="dark"] .port-row .pnow.err{border-color: oklch(0.5 0.14 25); background: oklch(0.28 0.075 25)}
+  html[data-theme="dark"] .port-row .pnow.err .plbl{color: oklch(0.88 0.13 25)}
+  html[data-theme="dark"] .btn-danger:hover{background: oklch(0.28 0.075 25)}
+  html[data-theme="dark"] .filecard .fc-ico{background: var(--up-soft); color: var(--up-ink)}
+  html[data-theme="dark"] .filecard .fc-ico.down{background: var(--down-soft); color: var(--down-ink)}
+  html[data-theme="dark"] .thumb{background: linear-gradient(135deg, oklch(0.34 0.05 220), oklch(0.3 0.05 265))}
+  html[data-theme="dark"] .thumb.a{background: linear-gradient(135deg, oklch(0.38 0.07 200), oklch(0.3 0.1 265))}
+  html[data-theme="dark"] .thumb.b{background: linear-gradient(135deg, oklch(0.36 0.06 150), oklch(0.32 0.08 190))}
+  html[data-theme="dark"] .thumb.c{background: linear-gradient(135deg, oklch(0.4 0.07 85), oklch(0.34 0.1 40))}
+  html[data-theme="dark"] .chip .cthumb{background: linear-gradient(135deg, oklch(0.4 0.07 200), oklch(0.32 0.1 265))}
+  html[data-theme="dark"] .chip .cthumb.b{background: linear-gradient(135deg, oklch(0.38 0.06 150), oklch(0.34 0.08 190))}
+  html[data-theme="dark"] .msg .av.person{background: linear-gradient(135deg, oklch(0.36 0.06 45), oklch(0.3 0.07 25)); color: oklch(0.88 0.08 45)}
+  html[data-theme="dark"] .card-btns button.primary:hover{background: var(--accent-fill-hover); border-color: var(--accent-fill-hover)}
+  html[data-theme="dark"] .csend.ready:hover{background: var(--accent-fill-hover)}
+
+  /* ============================================================
+     窄屏 —— 消息区与输入区重新排布，不出现横向滚动
+     ============================================================ */
+  @media (max-width: 920px){
+    .appbar{padding: 10px 14px 8px}
+    .brand p{display:none}
+    .chat-head{padding: 9px 14px; flex-wrap:wrap; row-gap:6px}
+    .chat-head .chat-stat{order:3; width:100%}
+    .msg{grid-template-columns: 30px minmax(0,1fr); gap:9px; padding: 9px 14px}
+    .msg .av{width:30px;height:30px}
+    .msg .stack{max-width:100%}
+    .msg .col{flex-direction:column; gap:6px}
+    .msg-acts{opacity:1; pointer-events:auto; margin-top:0}
+    .composer{padding: 8px 14px 12px}
+    .composer-shell{padding: 5px 6px 5px 12px}
+    .ed{max-height: 132px; font-size:13.5px}
+    .composer-foot{flex-wrap:wrap; row-gap:4px}
+    .composer-foot .right .kbd-send{display:none}
+    .detect .why{display:none}
+    .cbtn.t-emoji, .cbtn.t-at{display:none}
+    .expand-sheet{width: calc(100vw - 20px); height: calc(100vh - 20px)}
+    .expand-ed, .expand-head{padding-left:16px; padding-right:16px}
+    .img-grid.one{grid-template-columns: minmax(0,1fr)}
+    .filecard{max-width:100%}
+    .bot-menu{min-width: 0; right:0; left:auto; width: min(320px, calc(100vw - 28px))}
+    .add-menu{width: min(288px, calc(100vw - 28px))}
+    .popover{width: min(344px, calc(100vw - 28px))}
+    .modal .body{grid-template-columns: minmax(0,1fr)}
+    .modal .body .nav{flex-direction:row; overflow-x:auto; border-right:none; border-bottom:1px solid var(--border)}
+    .modal .body .nav .group-title{display:none}
+    .modal .body .nav button{white-space:nowrap}
+    .theme-grid{grid-template-columns: 1fr 1fr}
+    .scope{grid-template-columns: minmax(0,1fr) 68px; gap:10px}
+    .sc-head{flex-wrap:wrap; row-gap:4px}
+    .add-bot-form, .bot-list-edit .edit-grid{grid-template-columns: 1fr}
+    .toast{left:14px; right:14px; transform: translateY(-6px)}
+    .toast.show{transform: translateY(0)}
+  }
+</style>
+</head>
+<body>
+<div class="app" data-od-id="app-shell">
+
+  <div class="titlebar" data-od-id="titlebar">
+    <div class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+    <div class="title">青鸟 · 飞书消息助手</div>
+  </div>
+
+  <header class="appbar" data-od-id="appbar">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/>
+      </svg>
+    </div>
+    <div class="brand">
+      <h1>青鸟</h1>
+      <p>蓬山此去无多路，青鸟殷勤为探看</p>
+    </div>
+    <div class="spacer"></div>
+
+    <!-- 发送目标下拉：与 v1 一致 -->
+    <div class="bot-picker-wrap">
+      <button class="bot-picker" id="botPickerBtn" data-od-id="bot-picker" aria-label="选择发送目标" aria-haspopup="menu" aria-expanded="false">
+        <span class="dot" aria-hidden="true"></span>
+        <b id="currentBotName">TK</b>
+        <span style="color:var(--muted); font-size:12px" id="currentBotHint">已设置签名</span>
+        <span class="caret" aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </span>
+      </button>
+      <div class="bot-menu" id="botMenu" role="menu" aria-label="发送目标">
+        <div class="bot-menu-title">发送目标 · 3 个机器人</div>
+        <button class="bot-item active" data-name="TK" data-hint="已设置签名" role="menuitemradio" aria-checked="true">
+          <span class="bdot" aria-hidden="true"></span>
+          <div class="binfo"><b>TK</b><span>open.feishu.cn/…/12d180a3-f4b2</span></div>
+          <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+        <button class="bot-item" data-name="产品团队" data-hint="已设置签名" role="menuitemradio" aria-checked="false">
+          <span class="bdot" aria-hidden="true"></span>
+          <div class="binfo"><b>产品团队</b><span>open.feishu.cn/…/f9a2b1c7-88ee</span></div>
+          <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+        <button class="bot-item" data-name="Ops 告警" data-hint="未设置签名" role="menuitemradio" aria-checked="false">
+          <span class="bdot muted" aria-hidden="true"></span>
+          <div class="binfo"><b>Ops 告警</b><span>open.feishu.cn/…/3ce880d1-7a2f</span></div>
+          <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+        <div class="bot-menu-divider"></div>
+        <button class="bot-menu-action" id="menuGoManage">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          添加或管理机器人
+          <span class="sub">增/删/改</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 齿轮设置：与 v1 一致 -->
+    <button class="btn-ghost btn-icon" data-od-id="config-btn" id="openConfig" title="应用配置 · 凭证与偏好" aria-label="配置">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <!-- ============================================================
+       消息区：横向铺满，发送历史与文件传输在同一条流里
+       ============================================================ -->
+  <section class="chat" data-od-id="chat-panel">
+    <div class="chat-head" data-od-id="chat-head">
+      <div class="cn">
+        <b id="convName">TK</b>
+        <span class="sep">·</span>
+        <span>消息记录</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="chat-stat" id="chatStat" aria-live="polite">
+        <span class="s up"><i></i><span id="statUp">发出 6</span></span>
+        <span class="s down"><i></i><span id="statDown">接收 3</span></span>
+      </div>
+      <div class="pop-wrap">
+        <button class="chat-act" id="retrieveBtn" data-od-id="retrieve-btn" aria-expanded="false" aria-controls="retrievePop" title="粘贴群里的取回链接">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/><path d="M4 3h16"/></svg>
+          取回文件
+        </button>
+        <div class="popover" id="retrievePop" role="dialog" aria-label="取回文件">
+          <label for="retrieveInput">下载链接或加密载荷</label>
+          <div class="prow">
+            <input type="text" id="retrieveInput" spellcheck="false" placeholder="http://127.0.0.1:9876/dl?t=…" />
+            <button class="pgo" id="retrieveGo">解析</button>
+          </div>
+          <p class="phint" id="retrieveHint">群消息里的链接点不开时，把整条链接粘进来一样能取回文件。解析后会作为一条记录出现在下方。</p>
+        </div>
+      </div>
+      <button class="chat-act danger" id="clearBtn" data-od-id="clear-history" title="清空消息记录">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+        清空记录
+      </button>
+    </div>
+
+    <div class="chat-scroll" id="chatScroll" data-od-id="message-stream">
+      <div id="stream">
+
+        <div class="daysep">9月15日 · 周一</div>
+
+        <!-- 发出 · 富文本 -->
+        <article class="msg" data-od-id="msg-q3-report" data-dir="out">
+          <div class="av bot" aria-hidden="true">
+            <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/></svg>
+          </div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>青鸟</b>
+                <span class="tag">机器人</span>
+                <span class="dir">发出</span>
+                <span class="time">15:53</span>
+              </div>
+              <div class="bubble">
+                <div class="bub-head post">Q3 季度报告已发布<span class="htype">富文本 · post</span></div>
+                <div class="bub-body">
+                  <p>大家好，本季度的核心指标和复盘结论已经整理完毕，请各团队负责人在<strong>本周五前</strong>完成阅读并反馈。</p>
+                  <p>关键结论：</p>
+                  <ul>
+                    <li>新签 ARR 环比 <strong>+18.4%</strong></li>
+                    <li>续约率维持在 <strong>94%</strong>（同比 +2.1pt）</li>
+                    <li>华南区域拓展进度不及预期，下季度需重点关注</li>
+                  </ul>
+                  <p>📎 <a href="#" onclick="return false">查看完整报告</a></p>
+                  <p><span class="at">@所有人</span> 请查收</p>
+                </div>
+                <div class="bub-foot">
+                  <span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>已发送</span>
+                  <span>200 OK · 12 ms</span>
+                </div>
+              </div>
+              <button class="thread">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.4-.6L3 21l1.7-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg>
+                1 条回复
+              </button>
+            </div>
+            <div class="msg-acts">
+              <button data-act="copy" title="复制内容" aria-label="复制内容">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              </button>
+              <button data-act="resend" title="重新发送" aria-label="重新发送">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg>
+              </button>
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <!-- 发出 · 图片（2 张） -->
+        <article class="msg" data-od-id="msg-screenshots" data-dir="out">
+          <div class="av bot" aria-hidden="true">
+            <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/></svg>
+          </div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>青鸟</b>
+                <span class="tag">机器人</span>
+                <span class="dir">发出</span>
+                <span class="time">16:08</span>
+              </div>
+              <div class="bubble">
+                <div class="bub-head img">看板截图 · 2 张<span class="htype">图片 · image</span></div>
+                <div class="img-grid">
+                  <div class="thumb a"><span class="tn">看板-总览.png · 2560×1440</span></div>
+                  <div class="thumb b"><span class="tn">看板-漏斗.png · 2560×1440</span></div>
+                </div>
+                <div class="bub-foot">
+                  <span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>已发送 · 2 张图</span>
+                  <span>image_key 已换取</span>
+                </div>
+              </div>
+            </div>
+            <div class="msg-acts">
+              <button data-act="copy" title="复制图片" aria-label="复制图片">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              </button>
+              <button data-act="resend" title="重新发送" aria-label="重新发送">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg>
+              </button>
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <!-- 发出 · 文件（已完成） -->
+        <article class="msg" data-od-id="msg-xlsx-done" data-dir="out">
+          <div class="av bot" aria-hidden="true">
+            <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/></svg>
+          </div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>青鸟</b>
+                <span class="tag">机器人</span>
+                <span class="dir">发出</span>
+                <span class="time">16:41</span>
+              </div>
+              <div class="filecard done" data-od-id="file-xlsx">
+                <div class="fc-main">
+                  <span class="fc-ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+                  </span>
+                  <div class="fc-info">
+                    <b title="2026-Q3-财务底稿.xlsx">2026-Q3-财务底稿.xlsx</b>
+                    <div class="fmeta"><span>43.2 MB</span><span>已加密上传</span></div>
+                  </div>
+                </div>
+                <div class="fc-bot">
+                  <span class="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>取回链接已发到 TK · 30 分钟内有效</span>
+                  <span class="bacts"><button data-copy-link>复制链接</button></span>
+                </div>
+              </div>
+            </div>
+            <div class="msg-acts">
+              <button data-act="resend" title="重新发送" aria-label="重新发送">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg>
+              </button>
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <!-- 接收 · 文本 -->
+        <article class="msg" data-od-id="msg-deploy-note" data-dir="in">
+          <div class="av person" aria-hidden="true">付</div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>付新峰</b>
+                <span class="dir in">接收</span>
+                <span class="time">17:12</span>
+              </div>
+              <div class="bubble plain">15 环境已经部署完成，麻烦协助验证一下订单主流程：下单 → 支付 → 发货 → 退款。</div>
+            </div>
+            <div class="msg-acts">
+              <button data-act="copy" title="复制内容" aria-label="复制内容">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              </button>
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <!-- 接收 · 文件（已完成） -->
+        <article class="msg" data-od-id="msg-csv-done" data-dir="in">
+          <div class="av person" aria-hidden="true">付</div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>付新峰</b>
+                <span class="dir in">接收</span>
+                <span class="time">17:20</span>
+              </div>
+              <div class="filecard down done" data-od-id="file-csv">
+                <div class="fc-main">
+                  <span class="fc-ico down" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+                  </span>
+                  <div class="fc-info">
+                    <b title="客户清单-脱敏.csv">客户清单-脱敏.csv</b>
+                    <div class="fmeta"><span>2.3 MB</span><span>来自群里的取回链接</span></div>
+                  </div>
+                </div>
+                <div class="fc-bot">
+                  <span class="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>已解密并保存到下载目录</span>
+                  <span class="bacts"><button data-open-dir>打开目录</button></span>
+                </div>
+              </div>
+            </div>
+            <div class="msg-acts">
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <div class="daysep">昨天</div>
+
+        <!-- 发出 · 文件（上传中，进度实时走） -->
+        <article class="msg" data-od-id="msg-tgz-uploading" data-dir="out">
+          <div class="av bot" aria-hidden="true">
+            <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/></svg>
+          </div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>青鸟</b>
+                <span class="tag">机器人</span>
+                <span class="dir">发出</span>
+                <span class="time">18:02</span>
+              </div>
+              <div class="filecard" id="upTask" data-od-id="file-tgz">
+                <div class="fc-main">
+                  <span class="fc-ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+                  </span>
+                  <div class="fc-info">
+                    <b title="内网部署包-v1.4.2.tar.gz">内网部署包-v1.4.2.tar.gz</b>
+                    <div class="fmeta">
+                      <span>86.5 MB</span>
+                      <span class="live" id="upRate">正在上传 25.8 MB/s</span>
+                      <span id="upPct">28%</span>
+                    </div>
+                  </div>
+                  <button class="fc-cancel" id="upCancel" title="取消传输" aria-label="取消传输">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+                <div class="fc-bar" id="upBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="28" aria-label="加密上传进度"><i style="width:28%"></i></div>
+                <div class="fc-bot">
+                  <span class="st">本机加密后上传，飞书侧只有密文</span>
+                  <span class="bacts"><button id="upCancelAlt">取消</button></span>
+                </div>
+              </div>
+            </div>
+            <div class="msg-acts">
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <!-- 接收 · 文件（下载中） -->
+        <article class="msg" data-od-id="msg-zip-downloading" data-dir="in">
+          <div class="av person" aria-hidden="true">付</div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>付新峰</b>
+                <span class="dir in">接收</span>
+                <span class="time">18:07</span>
+              </div>
+              <div class="filecard down" id="downTask" data-od-id="file-zip">
+                <div class="fc-main">
+                  <span class="fc-ico down" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+                  </span>
+                  <div class="fc-info">
+                    <b title="招标文件-终稿.zip">招标文件-终稿.zip</b>
+                    <div class="fmeta">
+                      <span>24.8 MB</span>
+                      <span class="live down" id="dnRate">下载中 11.4 MB/s</span>
+                      <span id="dnPct">67%</span>
+                    </div>
+                  </div>
+                  <button class="fc-cancel" id="dnCancel" title="取消下载" aria-label="取消下载">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                  </button>
+                </div>
+                <div class="fc-bar" id="downBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="67" aria-label="下载进度"><i style="width:67%"></i></div>
+                <div class="fc-bot">
+                  <span class="st">解到「下载」目录，重名会追加时间戳</span>
+                  <span class="bacts"><button id="dnCancelAlt">取消</button></span>
+                </div>
+              </div>
+            </div>
+            <div class="msg-acts">
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <!-- 发出 · 文件（失败） -->
+        <article class="msg" data-od-id="msg-upload-failed" data-dir="out">
+          <div class="av bot" aria-hidden="true">
+            <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/></svg>
+          </div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>青鸟</b>
+                <span class="tag">机器人</span>
+                <span class="dir">发出</span>
+                <span class="time">19:24</span>
+              </div>
+              <div class="filecard fail" data-od-id="file-failed">
+                <div class="fc-main">
+                  <span class="fc-ico fail" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/></svg>
+                  </span>
+                  <div class="fc-info">
+                    <b title="生产库全量备份-20260916.dmp">生产库全量备份-20260916.dmp</b>
+                    <div class="fmeta"><span>213.6 MB</span><span>超出单文件上限 100 MB</span></div>
+                  </div>
+                </div>
+                <div class="fc-bar"><i style="width:100%"></i></div>
+                <div class="fc-bot">
+                  <span class="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/></svg>未发起上传 · 群里没有出现链接</span>
+                  <span class="bacts"><button data-retry>选择其他文件</button></span>
+                </div>
+              </div>
+            </div>
+            <div class="msg-acts">
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <div class="daysep">今天</div>
+
+        <!-- 发出 · 交互卡片 -->
+        <article class="msg" data-od-id="msg-approval-card" data-dir="out">
+          <div class="av bot" aria-hidden="true">
+            <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/></svg>
+          </div>
+          <div class="col">
+            <div class="stack">
+              <div class="who">
+                <b>青鸟</b>
+                <span class="tag">机器人</span>
+                <span class="dir">发出</span>
+                <span class="time">09:31</span>
+              </div>
+              <div class="bubble">
+                <div class="bub-head card">发布审批通知<span class="htype">交互卡片 · interactive</span></div>
+                <div class="card-msg">
+                  <div class="cm-head">生产环境 v1.4.2 待审批</div>
+                  <div class="cm-desc">灰度观察 48 小时无异常，申请全量发布。审批通过后自动开始分批推送。</div>
+                  <dl class="cm-kv">
+                    <dt>版本</dt><dd>v1.4.2</dd>
+                    <dt>变更</dt><dd>12 个提交 · 3 个服务</dd>
+                    <dt>窗口</dt><dd>今天 14:00 – 16:00</dd>
+                  </dl>
+                </div>
+                <div class="card-btns">
+                  <button class="primary" data-card="approve">批准</button>
+                  <button class="danger" data-card="reject">打回</button>
+                  <button data-card="later">稍后处理</button>
+                </div>
+                <div class="bub-foot">
+                  <span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>已发送 · 等待群内点击</span>
+                  <span>200 OK · 9 ms</span>
+                </div>
+              </div>
+            </div>
+            <div class="msg-acts">
+              <button data-act="resend" title="重新发送" aria-label="重新发送">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg>
+              </button>
+              <button data-act="remove" class="danger" title="删除这条记录" aria-label="删除这条记录">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+      </div>
+
+      <div class="chat-empty" id="chatEmpty" data-od-id="chat-empty">
+        <div class="ce-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.4-.6L3 21l1.7-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg>
+        </div>
+        <b>还没有任何记录</b>
+        <p>发出的消息、图片和文件，以及从群里取回的文件，都会按时间出现在这里。</p>
+      </div>
+    </div>
+  </section>
+  <!-- ============================================================
+       输入区：默认一行，与发送按钮整合在同一行
+       ============================================================ -->
+  <section class="composer" data-od-id="composer">
+    <div class="composer-shell">
+      <div class="ed is-empty" id="editor" data-od-id="editor" contenteditable="true" role="textbox"
+           aria-multiline="true" aria-label="发送给 TK" data-ph="发送给 TK" spellcheck="false"></div>
+
+      <div class="ctools">
+        <button class="cbtn t-emoji" id="btnEmoji" title="表情" aria-label="表情">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5v.01M15 9.5v.01"/></svg>
+        </button>
+        <button class="cbtn t-at" id="btnAt" title="@ 提及" aria-label="@ 提及"><span class="cletter">@</span></button>
+        <div class="add-wrap">
+          <button class="cbtn" id="btnAdd" aria-expanded="false" aria-haspopup="menu" aria-controls="addMenu" title="添加图片或文件" aria-label="添加图片或文件">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <div class="add-menu" id="addMenu" role="menu" aria-label="添加">
+            <div class="am-title">添加</div>
+            <button class="am-item" id="addImage" role="menuitem">
+              <span class="am-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-4.5-4.5L6 21"/></svg>
+              </span>
+              <span class="am-tx"><b>图片</b><span>所见即所得地插到光标处，随消息一起发出</span></span>
+            </button>
+            <button class="am-item" id="addFile" role="menuitem">
+              <span class="am-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-5"/><path d="M9.6 15.2L12 12.8l2.4 2.4"/></svg>
+              </span>
+              <span class="am-tx"><b>本地文件</b><span>加密后单独发一条记录，群里出现取回链接</span></span>
+            </button>
+          </div>
+        </div>
+        <button class="cbtn" id="btnExpand" title="放大输入框" aria-label="放大输入框">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        </button>
+        <button class="csend" id="btnSend" data-od-id="send-btn" aria-disabled="true" title="发送 · ↵" aria-label="发送">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="composer-foot" data-od-id="intent-bar">
+      <div class="detect">
+        <span class="marker" aria-hidden="true"></span>
+        <span class="dpill" id="typePill">文本</span>
+        <span class="why" id="whyText">编辑器为空 · 输入内容后会自动判断消息类型</span>
+      </div>
+      <div class="right">
+        <span class="cnt" id="counter"></span>
+        <span class="kbd-send"><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ============================================================
+     放大编辑：点击输入框内的 ↗ 展开至接近全屏
+     ============================================================ -->
+<div class="expand" id="expand" data-od-id="expand-editor" role="dialog" aria-modal="true" aria-label="放大编辑">
+  <div class="expand-sheet">
+    <div class="expand-bar">
+      <button class="ebtn" data-md="bold" title="加粗" aria-label="加粗" style="font-weight:700">B</button>
+      <button class="ebtn" data-md="strikeThrough" title="删除线" aria-label="删除线" style="text-decoration:line-through">S</button>
+      <button class="ebtn" data-md="italic" title="斜体" aria-label="斜体" style="font-style:italic">I</button>
+      <button class="ebtn" data-md="underline" title="下划线" aria-label="下划线" style="text-decoration:underline">U</button>
+      <span class="ebar-sep"></span>
+      <button class="ebtn" data-md="insertUnorderedList" title="无序列表" aria-label="无序列表">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg>
+      </button>
+      <button class="ebtn" data-md="insertOrderedList" title="有序列表" aria-label="有序列表">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/><path d="M4 6h1v4M3.6 10h2.8"/><path d="M3.8 15.4c0-.7.5-1.2 1.2-1.2s1.2.4 1.2 1c0 1-2.4 1.4-2.4 3h2.6"/></svg>
+      </button>
+      <span class="ebar-sep"></span>
+      <button class="ebtn" data-block="blockquote" title="引用" aria-label="引用">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 5v14"/><path d="M12 7c2 0 3.5 1.2 4 3-1 .2-2 .8-2.4 2"/><path d="M12 17h6"/></svg>
+      </button>
+      <button class="ebtn" data-wrap="code" title="代码" aria-label="代码">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      </button>
+      <button class="ebtn" data-link="1" title="插入链接" aria-label="插入链接">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </button>
+      <div class="ebar-right">
+        <span class="etip">↵ 直接发送</span>
+        <button class="ebtn" id="expandClose" title="收起" aria-label="收起">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="expand-head">
+      <input class="expand-title" id="expandTitle" placeholder="无标题" aria-label="标题" />
+    </div>
+
+    <div class="expand-ed is-empty" id="expandEd" role="textbox" aria-multiline="true" aria-label="消息内容"
+         data-ph="写点什么，或者把图片直接粘进来…" spellcheck="false"></div>
+
+    <div class="expand-foot">
+      <button class="cbtn" id="expandAddImage" title="插入图片" aria-label="插入图片">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-4.5-4.5L6 21"/></svg>
+      </button>
+      <button class="cbtn" id="expandAddFile" title="发送本地文件" aria-label="发送本地文件">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-5"/><path d="M9.6 15.2L12 12.8l2.4 2.4"/></svg>
+      </button>
+      <span class="ebar-sep"></span>
+      <span style="font-size:11.5px;color:var(--muted)" id="expandFrom">来自输入框的内容 · 收起时会带回去</span>
+      <div class="ef-hint">
+        <span id="expandCount">0 字</span>
+        <span><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+      </div>
+      <button class="csend" id="expandSend" aria-disabled="true" title="发送 · ↵" aria-label="发送">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+<input type="file" id="filePicker" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" tabindex="-1" aria-hidden="true" />
+<input type="file" id="imgPicker" accept="image/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" tabindex="-1" aria-hidden="true" />
+
+<!-- 拖拽接收遮罩 -->
+<div class="dropzone" id="dropzone" aria-hidden="true">
+  <div class="dz-card">
+    <div class="dz-ico">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+    </div>
+    <b>松手即开始传输</b>
+    <span>文件在本机加密后上传，群里只出现一条取回链接<br />单文件不超过 100 MB</span>
+  </div>
+</div>
+
+<!-- 发送文件确认（对应飞书「无法添加该类型的内容到输入框，将单独发送」） -->
+<div class="overlay" id="confirmOverlay" data-od-id="send-file-overlay" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="modal tiny" role="document">
+    <header>
+      <div class="m-title">
+        <h2 id="confirmTitle">发送给 <span id="confirmTarget">TK</span></h2>
+      </div>
+      <button class="close" id="confirmClose" aria-label="关闭">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="confirm-body">
+      <div class="confirm-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>无法添加该类型的内容到输入框，将单独发送。</span>
+      </div>
+      <div class="confirm-file">
+        <span class="cico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" id="confirmIconShape"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+        </span>
+        <span class="cinfo">
+          <b id="confirmName" title="DoubaoWork_Arm64_2.25.17.dmg">DoubaoWork_Arm64_2.25.17.dmg</b>
+          <span id="confirmMeta">343.0 MB · 加密后单独发一条记录</span>
+        </span>
+      </div>
+      <div class="e2e-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <span>端到端加密：文件在这台机器上加密后才上传，群里出现的是一条取回链接，链接 30 分钟内有效。</span>
+      </div>
+    </div>
+    <footer>
+      <div class="left">单文件不超过 100 MB</div>
+      <div class="spacer"></div>
+      <button class="btn-secondary" id="confirmCancel">取消</button>
+      <button class="btn-primary" id="confirmSend">发送</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 配置 Modal（与 v1 一致） -->
+<div class="overlay" id="configOverlay" data-od-id="config-overlay" role="dialog" aria-modal="true" aria-labelledby="configTitle">
+  <div class="modal" role="document">
+    <header>
+      <div class="m-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <h2 id="configTitle">配置</h2>
+      </div>
+      <button class="close" id="closeConfig" aria-label="关闭">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+
+    <div class="body">
+      <nav class="nav" aria-label="配置分类">
+        <div class="group-title">凭证</div>
+        <button class="active" data-tab="app">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 9h6v6H9z"/></svg>
+          飞书应用
+        </button>
+        <div class="group-title">集成</div>
+        <button data-tab="agent">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Agent
+        </button>
+        <div class="group-title">传输</div>
+        <button data-tab="transfer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16V4"/><path d="M3.5 7.5L7 4l3.5 3.5"/><path d="M17 8v12"/><path d="M20.5 16.5L17 20l-3.5-3.5"/></svg>
+          文件传输
+        </button>
+        <div class="group-title">通用</div>
+        <button data-tab="pref">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+          偏好
+        </button>
+        <button data-tab="about">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          关于
+        </button>
+      </nav>
+
+      <section class="pane active" id="paneApp">
+        <h3>飞书应用凭证</h3>
+        <p class="desc">
+          飞书群机器人（Webhook）本身无法上传图片。青鸟需要借助一个自建的<b style="color:var(--fg);font-weight:500">飞书应用</b>去调用
+          <code>POST /open-apis/im/v1/images</code> 换取 <code>image_key</code>，再由群机器人发出。凭证只保存在本地。
+        </p>
+        <div class="field">
+          <div class="field-head"><b>App ID</b><span class="req">*</span></div>
+          <input type="text" value="cli_a1b2c3d4e5f60123" spellcheck="false" />
+          <div class="field-hint">在飞书开放平台 · 「凭证与基础信息」中获取，形如 <code>cli_xxxxxxxx</code></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><b>App Secret</b><span class="req">*</span><button class="toggle" id="toggleSecret">显示</button></div>
+          <input type="password" id="secretInput" value="ZAbCdEfGh1234567890IjKlMn" spellcheck="false" />
+          <div class="field-hint">仅本地存储（macOS Keychain / Windows Credential Locker），不会上传到任何服务器。<a href="#" onclick="return false">如何获取 →</a></div>
+        </div>
+        <div class="status-card" data-od-id="perm-check-card">
+          <div class="sc-head" data-od-id="perm-card-head">
+            <span class="sc-tick" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            </span>
+            <b>已连接 · TK 应用（tk-inner-bot）</b>
+            <span class="sc-count warn" id="permCount">3 / 4 项就绪</span>
+            <span class="sc-time">3 秒前校验</span>
+          </div>
+          <ul class="scope-list" data-od-id="perm-scope-list">
+            <li class="scope">
+              <span class="scope-name"><code class="scope-code">tenant_access_token</code></span>
+              <span class="sbadge neutral">可获取</span>
+            </li>
+            <li class="scope">
+              <span class="scope-name"><code class="scope-code">bot:v3:info</code></span>
+              <span class="sbadge neutral">可访问</span>
+            </li>
+            <li class="scope">
+              <span class="scope-name"><code class="scope-code">im:resource:upload</code></span>
+              <span class="sbadge ok">已开通</span>
+            </li>
+            <li class="scope">
+              <span class="scope-name"><code class="scope-code">drive:drive</code><span class="scope-note">云空间</span></span>
+              <span class="sbadge warn">未开通</span>
+            </li>
+          </ul>
+          <div class="sc-issue" data-od-id="perm-issue">
+            <div class="issue-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              缺少云空间权限
+            </div>
+            <p>两端机器无法直连时，青鸟需要用飞书云空间中转文件。缺 <code>drive:drive</code> 权限的这段时间，只有同一网络内的机器能互传。申请后必须发布新版本才会生效。</p>
+            <div class="action-row">
+              <button class="btn-secondary" id="permApply">申请 drive:drive 权限 <span aria-hidden="true">↗</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="action-row">
+          <button class="btn-secondary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            重新测试连接
+          </button>
+          <button class="btn-link">前往飞书开放平台 ↗</button>
+        </div>
+      </section>
+
+      <section class="pane" id="paneAgent">
+        <div class="pane-title-row">
+          <h3>Agent 集成</h3>
+          <a class="pane-title-link" href="#" onclick="return false">CLI 与 SKILL.md 文档 ↗</a>
+        </div>
+        <p class="desc">让 <b style="color:var(--fg);font-weight:500">AI Agent</b> 通过命令行调用青鸟发消息、上传图片、查看历史。</p>
+        <div class="agent-card installed" data-agent="cli">
+          <div class="agent-card-head">
+            <div class="agent-ico cli">&gt;_</div>
+            <div class="agent-meta">
+              <b>青鸟 CLI <code>qingniao</code></b>
+              <span>在终端里发消息、上传图片、查看历史，支持 <code>--json</code> 结构化输出</span>
+            </div>
+            <div class="agent-card-cta">
+              <span class="agent-status installed-only">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                已安装 v1.2.0
+              </span>
+              <button class="agent-btn installed-only" data-action="uninstall-cli">卸载</button>
+              <button class="agent-btn primary not-installed-only" data-action="install-cli">安装</button>
+            </div>
+          </div>
+        </div>
+        <div class="agent-card installed" data-agent="skill">
+          <div class="agent-card-head">
+            <div class="agent-ico skill">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 7h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h5"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/><circle cx="12" cy="14" r="2"/></svg>
+            </div>
+            <div class="agent-meta">
+              <b>Agent 技能包 <code>SKILL.md</code></b>
+              <span>让 Claude / Codex / 豆包等 Agent 识别青鸟能力，一个 <code>send</code> 就能发出去</span>
+            </div>
+            <div class="agent-card-cta">
+              <span class="agent-status installed-only">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                已安装
+              </span>
+              <button class="agent-btn installed-only" data-action="uninstall-skill">卸载</button>
+              <button class="agent-btn primary not-installed-only" data-action="install-skill">安装</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane" id="paneTransfer">
+        <div class="pane-title-row"><h3>文件传输</h3></div>
+        <p class="desc">在内网机与外网机之间互传文件。传输是<b style="color:var(--fg);font-weight:500">端到端加密</b>的：文件在发送方机器上加密，只有配过对的接收方机器能解开，飞书和群里的其他人拿到的都是密文。</p>
+
+        <div class="pref-section">
+          <h4>本地服务</h4>
+          <div class="port-row">
+            <div class="pf">
+              <div class="field-head"><b>配置端口</b></div>
+              <input type="text" id="portInput" value="9876" spellcheck="false" aria-describedby="portHint" />
+            </div>
+            <div class="pnow" id="portNow">
+              <span class="sdot" aria-hidden="true"></span>
+              <span class="plbl">实际绑定</span>
+              <code id="portBound">127.0.0.1:9876</code>
+            </div>
+          </div>
+          <div class="field-hint" id="portHint" style="margin-top:8px">
+            群消息里的链接一律用实际绑定端口生成。改端口需要保存并重启服务，重启后此前发出的旧链接会失效 —— 端口被占用时青鸟不会自动换端口，只会明确告诉你是谁占着。
+          </div>
+          <div class="action-row" style="margin-top:12px">
+            <button class="btn-secondary" id="portRestart">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              保存并重启服务
+            </button>
+          </div>
+          <div class="pref-row" style="margin-top:6px">
+            <div class="rlbl"><b>随青鸟常驻后台</b><span>关闭窗口后服务继续监听，群里的链接才点得开</span></div>
+            <button class="switch on" aria-label="切换本地服务常驻"></button>
+          </div>
+        </div>
+
+        <div class="pref-section">
+          <h4>下载</h4>
+          <div class="field">
+            <div class="field-head"><b>下载目录</b></div>
+            <div class="dir-row">
+              <span class="dpath" title="/Users/fuxinfeng/Downloads">/Users/fuxinfeng/Downloads</span>
+              <button class="btn-secondary">更改…</button>
+            </div>
+            <div class="field-hint">取回的文件直接存到这里，不再弹框询问；目录不存在时自动创建，重名会追加时间戳。</div>
+          </div>
+        </div>
+
+        <div class="pref-section">
+          <h4>传输密钥</h4>
+          <div class="key-card" id="keyCard" data-slot="">
+            <div class="key-head">
+              <div class="kico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1.4"/></svg>
+              </div>
+              <div class="kmeta">
+                <b>传输密钥 · 已配对</b>
+                <div class="krow">
+                  <span class="kid">指纹 a1b2c3d4</span>
+                  <span>生成于 2026-09-12</span>
+                  <span>存于 macOS 钥匙串</span>
+                </div>
+              </div>
+              <div class="kacts">
+                <button class="agent-btn" data-key="export">导出配对</button>
+                <button class="agent-btn" data-key="import">导入</button>
+                <button class="agent-btn" data-key="rotate">轮换</button>
+              </div>
+            </div>
+
+            <div class="key-slot key-slot-export">
+              <h5>把密钥带到你的另一台机器</h5>
+              <p>另一台机器在「导入」里粘贴下面这串，两边显示的指纹一致就算配对成功。没配过对的机器收到文件也打不开。</p>
+              <div class="key-reveal">
+                <code class="masked" id="keyPlain">•••• •••• •••• •••• •••• •••• •••• ••••</code>
+                <button class="btn-secondary" id="keyReveal">显示</button>
+                <button class="btn-secondary" id="keyCopy">复制</button>
+              </div>
+              <div class="warn-note">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span><b>严禁把这串密钥发进飞书群、云文档或任何飞书载体。</b>端到端加密的前提就是飞书拿不到这把钥匙；一旦它经飞书传过一次，所有文件都等于明文。请当面输入，或走你自己信得过的渠道。</span>
+              </div>
+            </div>
+
+            <div class="key-slot key-slot-import">
+              <h5>从另一台机器导入</h5>
+              <p>粘贴另一台机器「导出配对」里显示的那串密钥，青鸟会算出指纹给你和对面核对。</p>
+              <input type="text" id="keyImportInput" spellcheck="false" value="7f3ac91e5b284d06a1c8e93f47d2b60518aa73cd9e4f1b82c057d6a3e9418fbc" placeholder="64 位十六进制主密钥" />
+              <div class="fp-match" id="keyImportFp">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+                <span>指纹 <code>a1b2c3d4</code> —— 与另一台机器显示的一致，可以确认导入</span>
+              </div>
+              <div class="action-row" style="margin-top:12px">
+                <button class="btn-primary">确认导入并覆盖本机密钥</button>
+              </div>
+            </div>
+
+            <div class="key-slot key-slot-rotate">
+              <h5>轮换主密钥</h5>
+              <p>换一把新密钥。旧密钥还会保留 <b style="color:var(--fg);font-weight:500">30 天</b>，这期间已经发出去的旧链接仍然能下载；过了 30 天旧链接全部失效。</p>
+              <div class="warn-note">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>换完之后必须把新密钥重新导入另一台机器，否则两台机器之间就传不了了。</span>
+              </div>
+              <div class="action-row" style="margin-top:12px">
+                <button class="btn-danger">生成新密钥并保留旧密钥 30 天</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane" id="panePref">
+        <h3>偏好</h3>
+        <p class="desc">调整青鸟的外观与默认行为，所有偏好仅影响本设备。</p>
+        <div class="pref-section">
+          <h4>主题</h4>
+          <div class="theme-grid" id="themeGrid">
+            <button type="button" class="theme-card active" data-theme="auto" aria-pressed="true">
+              <div class="prv auto"><div class="header-bar"></div><div class="body-bar"></div><div class="accent-btn"></div></div>
+              <div class="lbl"><span class="radio"></span><b>自动</b><span class="sub">跟随系统</span></div>
+            </button>
+            <button type="button" class="theme-card" data-theme="light" aria-pressed="false">
+              <div class="prv light"><div class="header-bar"></div><div class="body-bar"></div><div class="accent-btn"></div></div>
+              <div class="lbl"><span class="radio"></span><b>明亮</b></div>
+            </button>
+            <button type="button" class="theme-card" data-theme="dark" aria-pressed="false">
+              <div class="prv dark"><div class="header-bar"></div><div class="body-bar"></div><div class="accent-btn"></div></div>
+              <div class="lbl"><span class="radio"></span><b>黑暗</b></div>
+            </button>
+          </div>
+        </div>
+        <div class="pref-section">
+          <h4>编辑器</h4>
+          <div class="pref-row">
+            <div class="rlbl"><b>智能识别默认</b><span>粘贴或输入时，优先尝试哪种消息类型</span></div>
+            <div class="pref-seg" role="tablist">
+              <button class="active">自动</button><button>优先富文本</button><button>优先纯文本</button>
+            </div>
+          </div>
+          <div class="pref-row">
+            <div class="rlbl"><b>发送快捷键</b><span>控制按下什么组合会真的把消息送出去</span></div>
+            <div class="pref-seg" role="tablist"><button class="active">⌘↵</button><button>Enter</button></div>
+          </div>
+          <div class="pref-row">
+            <div class="rlbl"><b>发送成功提示音</b><span>结果提示出现时播放一次系统音效</span></div>
+            <button class="switch on" aria-label="切换发送成功提示音"></button>
+          </div>
+          <div class="pref-row">
+            <div class="rlbl"><b>粘贴图片自动插入</b><span>粘贴的图片直接插到光标处，不再单独弹确认框</span></div>
+            <button class="switch on" aria-label="切换粘贴自动插入"></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="pane" id="paneAbout">
+        <div class="about-hero">
+          <div class="logo-lg">
+            <svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/>
+            </svg>
+          </div>
+          <h4 class="name">青鸟</h4>
+          <div class="ver">v2.0.0 · build 20260917</div>
+          <div class="quote">「蓬山此去无多路，青鸟殷勤为探看」</div>
+        </div>
+        <div class="about-meta">
+          <div class="item"><b>飞书 OpenAPI</b><span>v1.x · stable</span></div>
+          <div class="item"><b>运行时</b><span>Electron 30.1.0</span></div>
+          <div class="item"><b>数据目录</b><span style="font-size:11px">~/Library/Application Support/qingniao</span></div>
+          <div class="item"><b>最近更新</b><span>2026-09-17</span></div>
+        </div>
+        <div class="about-links">
+          <a href="#" onclick="return false">GitHub ↗</a>
+          <a href="#" onclick="return false">帮助文档 ↗</a>
+          <a href="#" onclick="return false">反馈问题 ↗</a>
+          <a href="#" onclick="return false">发行说明</a>
+          <a href="#" onclick="return false">开源许可</a>
+        </div>
+      </section>
+    </div>
+
+    <footer>
+      <div class="left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        凭证加密后保存在本设备
+      </div>
+      <div class="spacer"></div>
+      <button class="btn-secondary" id="cancelConfig">取消</button>
+      <button class="btn-primary" id="saveConfig">保存</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 管理机器人 Modal -->
+<div class="overlay" id="manageOverlay" data-od-id="manage-overlay" role="dialog" aria-modal="true" aria-labelledby="manageTitle">
+  <div class="modal" style="width:640px" role="document">
+    <header>
+      <div class="m-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <h2 id="manageTitle">管理机器人</h2>
+      </div>
+      <button class="close" id="closeManage" aria-label="关闭">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="body single">
+      <section class="pane active">
+        <h3>群机器人（Webhook）</h3>
+        <p class="desc">每个机器人对应一个飞书群，青鸟据此决定消息发去哪里。<b style="color:var(--fg);font-weight:500">签名密钥</b>是可选的：留空则不带签名，飞书群若开启了「仅接受签名」会拒收。</p>
+        <div class="bot-list" id="botList">
+          <div class="bot-list-item" data-bot="TK">
+            <div class="bot-list-head">
+              <div class="avt">TK</div>
+              <div class="meta">
+                <b>TK</b>
+                <div class="row"><span>open.feishu.cn/…/12d180a3-f4b2</span><span class="tag ok">已签名</span></div>
+              </div>
+              <div class="acts"><button data-action="edit">编辑</button><button class="danger" data-action="delete">删除</button></div>
+            </div>
+            <div class="bot-list-edit">
+              <div class="edit-grid">
+                <input type="text" value="TK" placeholder="名称" />
+                <input type="text" value="ABCd1234EfGhIjKlMn5678" placeholder="签名密钥（留空则不带签名）" />
+                <input type="text" class="full" value="https://open.feishu.cn/open-apis/bot/v2/hook/12d180a3-f4b2-4a5c-b7e9-4c88ab001234" placeholder="Webhook 地址" />
+              </div>
+              <div class="edit-actions">
+                <span class="edit-hint">修改会立即生效，不影响已发送的历史消息</span>
+                <button data-action="cancel-edit">取消</button>
+                <button class="primary" data-action="save-edit">保存修改</button>
+              </div>
+            </div>
+            <div class="bot-list-confirm">
+              <span class="msg">确认删除 <b>TK</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>
+              <button data-action="cancel-delete">取消</button>
+              <button class="danger" data-action="confirm-delete">确认删除</button>
+            </div>
+          </div>
+          <div class="bot-list-item" data-bot="产品团队">
+            <div class="bot-list-head">
+              <div class="avt alt">产</div>
+              <div class="meta">
+                <b>产品团队</b>
+                <div class="row"><span>open.feishu.cn/…/f9a2b1c7-88ee</span><span class="tag ok">已签名</span></div>
+              </div>
+              <div class="acts"><button data-action="edit">编辑</button><button class="danger" data-action="delete">删除</button></div>
+            </div>
+            <div class="bot-list-edit">
+              <div class="edit-grid">
+                <input type="text" value="产品团队" placeholder="名称" />
+                <input type="text" value="Qw3rTyUiOpAsDfGhJk9012" placeholder="签名密钥（留空则不带签名）" />
+                <input type="text" class="full" value="https://open.feishu.cn/open-apis/bot/v2/hook/f9a2b1c7-88ee-4d76-a1b3-2f5e9c00abcd" placeholder="Webhook 地址" />
+              </div>
+              <div class="edit-actions">
+                <span class="edit-hint">修改会立即生效，不影响已发送的历史消息</span>
+                <button data-action="cancel-edit">取消</button>
+                <button class="primary" data-action="save-edit">保存修改</button>
+              </div>
+            </div>
+            <div class="bot-list-confirm">
+              <span class="msg">确认删除 <b>产品团队</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>
+              <button data-action="cancel-delete">取消</button>
+              <button class="danger" data-action="confirm-delete">确认删除</button>
+            </div>
+          </div>
+          <div class="bot-list-item" data-bot="Ops 告警">
+            <div class="bot-list-head">
+              <div class="avt warn">Op</div>
+              <div class="meta">
+                <b>Ops 告警</b>
+                <div class="row"><span>open.feishu.cn/…/3ce880d1-7a2f</span><span class="tag warn">未签名</span></div>
+              </div>
+              <div class="acts"><button data-action="edit">编辑</button><button class="danger" data-action="delete">删除</button></div>
+            </div>
+            <div class="bot-list-edit">
+              <div class="edit-grid">
+                <input type="text" value="Ops 告警" placeholder="名称" />
+                <input type="text" value="" placeholder="签名密钥（留空则不带签名）" />
+                <input type="text" class="full" value="https://open.feishu.cn/open-apis/bot/v2/hook/3ce880d1-7a2f-4b3c-8ee6-1a2b3c4d5e6f" placeholder="Webhook 地址" />
+              </div>
+              <div class="edit-actions">
+                <span class="edit-hint">修改会立即生效，不影响已发送的历史消息</span>
+                <button data-action="cancel-edit">取消</button>
+                <button class="primary" data-action="save-edit">保存修改</button>
+              </div>
+            </div>
+            <div class="bot-list-confirm">
+              <span class="msg">确认删除 <b>Ops 告警</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>
+              <button data-action="cancel-delete">取消</button>
+              <button class="danger" data-action="confirm-delete">确认删除</button>
+            </div>
+          </div>
+        </div>
+
+        <h4 style="margin: 22px 0 0; font-size:11px; color: var(--muted); text-transform:uppercase; letter-spacing:0.6px; font-weight:600">添加新机器人</h4>
+        <div class="add-bot-form">
+          <input type="text" placeholder="名称（如：测试群机器人）" />
+          <input type="text" placeholder="签名密钥（没有可留空）" />
+          <input type="text" class="full" placeholder="Webhook 地址 https://open.feishu.cn/open-apis/bot/v2/hook/…" />
+          <div class="foot">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>签名密钥用于自动计算 sign，留空则不带签名</span>
+            <div class="spacer"></div>
+            <button class="btn-primary" style="padding: 7px 14px">添加</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <footer>
+      <div class="left">共 3 个机器人</div>
+      <div class="spacer"></div>
+      <button class="btn-secondary" id="closeManageFooter">完成</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 结果提示 -->
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="tdot" aria-hidden="true"></span>
+  <span id="toastText">已发送到 TK</span>
+  <code id="toastMeta">200 OK · 12 ms</code>
+</div>
+<script>
+(function(){
+  'use strict';
+  var $  = function(s, r){ return (r || document).querySelector(s); };
+  var $$ = function(s, r){ return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+
+  var BIRD = '<svg viewBox="0 0 22 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/></svg>';
+  var OK_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+  var WARN_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/></svg>';
+  var FILE_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>';
+  var X_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  var COPY_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  var RESEND_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg>';
+
+  function esc(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+    });
+  }
+  function clock(){
+    var d = new Date();
+    return ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
+  }
+  function fmtSize(b){
+    if (b >= 1073741824) return (b/1073741824).toFixed(2) + ' GB';
+    if (b >= 1048576)    return (b/1048576).toFixed(1) + ' MB';
+    if (b >= 1024)       return Math.round(b/1024) + ' KB';
+    return b + ' B';
+  }
+
+  var botName = function(){ return ($('#currentBotName').textContent || 'TK').trim(); };
+
+  /* ================= 结果提示 ================= */
+  var toastTimer = null;
+  function toast(msg, meta, kind){
+    var t = $('#toast');
+    $('#toastText').textContent = msg;
+    $('#toastMeta').textContent = meta || '';
+    t.classList.toggle('err', kind === 'err');
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2600);
+  }
+
+  /* ================= 编辑器 ================= */
+  var ed = $('#editor');
+  var expEd = $('#expandEd');
+  var RANGES = new Map();
+
+  document.addEventListener('selectionchange', function(){
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    var r = sel.getRangeAt(0);
+    [ed, expEd].forEach(function(el){
+      if (el.contains(r.commonAncestorContainer)) RANGES.set(el, r.cloneRange());
+    });
+  });
+
+  function hasChips(el){ return !!el.querySelector('.chip'); }
+  function isBlank(el){
+    return el.innerText.replace(/\u200b/g,'').trim() === '' && !hasChips(el);
+  }
+  function syncEmpty(el){
+    if (el.innerText.replace(/\u200b/g,'').trim() === '' && !hasChips(el)) el.innerHTML = '';
+    el.classList.toggle('is-empty', isBlank(el));
+  }
+  function countChars(el){
+    var t = (el.innerText || '').replace(/\s/g,'');
+    return t.length;
+  }
+
+  function activeEd(){
+    return $('#expand').classList.contains('show') ? expEd : ed;
+  }
+
+  /* 智能识别消息类型 */
+  function detect(){
+    var el = activeEd();
+    var text = el.innerText || '';
+    var chips = $$('.chip', el).length;
+    var hasMd = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|^#{1,3}\s|^[-*]\s|^>\s|^\d+\.\s)/m.test(text);
+    var hasAt = /@所有人|@[^\s@]{1,12}/.test(text);
+    if (/```card|\{\s*"config"|\{\s*"header"/.test(text))
+      return { t:'interactive', why:'检测到 <b>卡片 JSON</b>，将以交互卡片渲染' };
+    if (chips && !text.trim())
+      return { t:'image', why:'仅包含 <b>' + chips + ' 张图片</b>，采用图片消息发送' };
+    if (chips || hasMd || hasAt)
+      return { t:'post', why:'检测到 <b>' + [chips && (chips + ' 张图片'), hasMd && 'Markdown', hasAt && '@ 提及'].filter(Boolean).join('、') + '</b>，纯文本无法完整呈现' };
+    if (!text.trim())
+      return { t:'text', why:'编辑器为空 · 输入内容后会自动判断消息类型' };
+    return { t:'text', why:'纯文字消息，直接以 text 类型发送' };
+  }
+
+  var TYPE_LABEL = { text:'文本', post:'富文本', image:'图片', interactive:'交互卡片' };
+
+  function refresh(){
+    var el = activeEd();
+    var d = detect();
+    var pill = $('#typePill');
+    pill.className = 'dpill ' + d.t;
+    pill.textContent = TYPE_LABEL[d.t];
+    $('#whyText').innerHTML = d.why;
+
+    var n = countChars(el);
+    $('#counter').textContent = n ? n + ' 字' : '';
+    $('#expandCount').textContent = n + ' 字';
+
+    var ready = !isBlank(el);
+    [$('#btnSend'), $('#expandSend')].forEach(function(b){
+      b.classList.toggle('ready', ready);
+      b.setAttribute('aria-disabled', String(!ready));
+    });
+  }
+
+  [ed, expEd].forEach(function(el){
+    el.addEventListener('input', function(ev){
+      if (ev && ev.isComposing){ refresh(); return; }   /* 输入法组字期间不要动 DOM */
+      syncEmpty(el);
+      refresh();
+    });
+    el.addEventListener('blur', function(){ syncEmpty(el); });
+    el.addEventListener('keydown', function(e){
+      if (e.key !== 'Enter') return;
+      if (e.shiftKey) return;                    // Shift+Enter 换行
+      if (e.metaKey || e.ctrlKey || !e.isComposing){ e.preventDefault(); send(); }
+    });
+    el.addEventListener('paste', function(e){
+      var items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (var i = 0; i < items.length; i++){
+        var it = items[i];
+        if (it.type && it.type.indexOf('image/') === 0){
+          e.preventDefault();
+          var f = it.getAsFile();
+          var r = new FileReader();
+          r.onload = function(ev){
+            insertChip(el, f && f.name ? f.name : '粘贴的图片.png', ev.target.result);
+          };
+          r.readAsDataURL(f);
+        }
+      }
+    });
+  });
+
+  /* 在光标处插入节点（所见即所得） */
+  function insertNode(el, node){
+    var r = RANGES.get(el);
+    if (r && el.contains(r.commonAncestorContainer)){
+      r.deleteContents();
+      r.insertNode(node);
+      var after = document.createRange();
+      after.setStartAfter(node);
+      after.collapse(true);
+      RANGES.set(el, after);
+    } else {
+      el.appendChild(node);
+    }
+    el.focus();
+    if (RANGES.get(el)){
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(RANGES.get(el));
+    }
+    syncEmpty(el);
+    refresh();
+  }
+
+  var chipSeq = 0;
+  var TONES = ['', 'b', 'c'];
+  function insertChip(el, name, dataUrl){
+    var chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.setAttribute('contenteditable', 'false');
+    chip.setAttribute('data-name', name);
+    chip.innerHTML = '<span class="cthumb ' + TONES[chipSeq++ % 3] + '"></span><span class="cnm"></span>' +
+                     '<button class="cx" type="button" aria-label="移除这张图片">×</button>';
+    chip.querySelector('.cnm').textContent = name;
+    if (dataUrl) chip.querySelector('.cthumb').style.backgroundImage = 'url(' + dataUrl + ')';
+    insertNode(el, chip);
+    return chip;
+  }
+  function chipName(chip){ return chip.getAttribute('data-name') || '图片.png'; }
+  function chipThumb(chip){
+    var t = chip.querySelector('.cthumb');
+    return t ? t.getAttribute('style') || '' : '';
+  }
+  function chipTone(chip){
+    var t = chip.querySelector('.cthumb');
+    if (!t) return '';
+    return t.classList.contains('b') ? 'b' : (t.classList.contains('c') ? 'c' : '');
+  }
+
+  function removeChip(chip){
+    var host = chip.parentNode;
+    chip.parentNode.removeChild(chip);
+    if (host === ed || host === expEd){ syncEmpty(host); refresh(); }
+    else { refreshStats(); }
+  }
+
+  [ed, expEd].forEach(function(el){
+    el.addEventListener('click', function(e){
+      var x = e.target.closest('.cx');
+      if (!x) return;
+      e.preventDefault(); e.stopPropagation();
+      var chip = x.closest('.chip');
+      if (chip) removeChip(chip);
+    });
+  });
+
+  /* ================= 插入图片 / 发送文件 ================= */
+  /* 选择器只注册一次监听；armed 标记表示"用户确实开了对话框"。
+     原型里若用户没挑文件（取消），插一张标了名字的示例图，方便看到插入效果。 */
+  var imgArmed = false, fileArmed = false;
+
+  function pickImages(){
+    closeAddMenu();
+    imgArmed = true;
+    var inp = $('#imgPicker');
+    inp.value = '';
+    inp.click();
+  }
+  $('#imgPicker').addEventListener('change', function(){
+    if (!imgArmed) return;
+    imgArmed = false;
+    var el = activeEd();
+    Array.prototype.forEach.call(this.files, function(f){
+      var rd = new FileReader();
+      rd.onload = function(ev){ insertChip(el, f.name, ev.target.result); };
+      rd.readAsDataURL(f);
+    });
+  });
+
+  var pendingFile = null;
+  function pickFile(){
+    closeAddMenu();
+    fileArmed = true;
+    var inp = $('#filePicker');
+    inp.value = '';
+    inp.click();
+  }
+  $('#filePicker').addEventListener('change', function(){
+    if (!fileArmed) return;
+    fileArmed = false;
+    if (this.files && this.files[0]) handleFile(this.files[0]);
+  });
+
+  window.addEventListener('focus', function(){
+    if (!imgArmed && !fileArmed) return;
+    setTimeout(function(){
+      if (imgArmed){ imgArmed = false; insertChip(activeEd(), '看板-总览.png'); }
+      if (fileArmed){ fileArmed = false; handleFile({ name:'DoubaoWork_Arm64_2.25.17.dmg', size: 343.0 * 1048576 }); }
+    }, 400);
+  });
+
+  function handleFile(file){
+    pendingFile = file;
+    $('#confirmTarget').textContent = botName();
+    $('#confirmName').textContent = file.name;
+    $('#confirmName').title = file.name;
+    var big = file.size > 100 * 1048576;
+    $('#confirmMeta').textContent = fmtSize(file.size) + (big ? ' · 超出单文件上限 100 MB' : ' · 加密后单独发一条记录');
+    $('#confirmIconShape').innerHTML = big
+      ? '<circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/>'
+      : '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/>';
+    $('#confirmSend').disabled = big;
+    $('#confirmSend').style.opacity = big ? '0.5' : '';
+    $('#confirmSend').textContent = big ? '无法发送' : '发送';
+    $('#confirmOverlay').classList.add('show');
+  }
+  function closeConfirm(){ $('#confirmOverlay').classList.remove('show'); }
+
+  /* ================= 发送 ================= */
+  var sentSeq = 0;
+
+  function inline(s){
+    var out = esc(s);
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+    out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="#" onclick="return false">$1</a>');
+    out = out.replace(/@(所有人|[^\s@<]{1,12})/g, '<span class="at">@$1</span>');
+    return out;
+  }
+  function renderText(raw){
+    var lines = String(raw).split('\n'), html = '', inUl = false;
+    function closeUl(){ if (inUl){ html += '</ul>'; inUl = false; } }
+    for (var i = 0; i < lines.length; i++){
+      var t = lines[i].trim();
+      if (/^[-*]\s+/.test(t)){
+        if (!inUl){ html += '<ul>'; inUl = true; }
+        html += '<li>' + inline(t.replace(/^[-*]\s+/,'')) + '</li>';
+        continue;
+      }
+      closeUl();
+      if (!t) continue;
+      if (/^#{1,3}\s+/.test(t)){ html += '<h4>' + inline(t.replace(/^#{1,3}\s+/,'')) + '</h4>'; continue; }
+      if (/^>\s?/.test(t)){ html += '<div class="quote">' + inline(t.replace(/^>\s?/,'')) + '</div>'; continue; }
+      html += '<p>' + inline(t) + '</p>';
+    }
+    closeUl();
+    return html || '<p>' + inline(raw) + '</p>';
+  }
+
+  function msgActs(kinds){
+    var icons = { copy: COPY_ICO, resend: RESEND_ICO, remove: X_ICO };
+    var titles = { copy:'复制内容', resend:'重新发送', remove:'删除这条记录' };
+    return '<div class="msg-acts">' + kinds.map(function(k){
+      return '<button data-act="' + k + '"' + (k === 'remove' ? ' class="danger"' : '') +
+             ' title="' + titles[k] + '" aria-label="' + titles[k] + '">' + icons[k] + '</button>';
+    }).join('') + '</div>';
+  }
+  function whoLine(dir){
+    return '<div class="who"><b>青鸟</b><span class="tag">机器人</span>' +
+           '<span class="dir">发出</span><span class="time">' + clock() + '</span></div>';
+  }
+  function botAv(){ return '<div class="av bot" aria-hidden="true">' + BIRD + '</div>'; }
+
+  function newMsg(id, dir){
+    var art = document.createElement('article');
+    art.className = 'msg';
+    art.setAttribute('data-dir', dir || 'out');
+    art.setAttribute('data-od-id', id);
+    return art;
+  }
+
+  function send(){
+    var el = activeEd();
+    if (isBlank(el)) return;
+    var d = detect();
+    var bot = botName();
+    var text = (el.innerText || '').replace(/\u200b/g,'').replace(/\n{3,}/g,'\n\n').trim();
+    var chips = $$('.chip', el);
+
+    var art = newMsg('msg-sent-' + (++sentSeq), 'out');
+    var bubble = '';
+
+    if (chips.length && !text){
+      /* 纯图片消息 */
+      var tiles = chips.map(function(c, i){
+        var bg = chipThumb(c);
+        return '<div class="thumb ' + chipTone(c) + '"' + (bg ? ' style="' + bg + '"' : '') +
+               '><span class="tn">' + esc(chipName(c)) + '</span></div>';
+      }).join('');
+      bubble =
+        '<div class="bubble">' +
+          '<div class="bub-head img">' + chips.length + ' 张图片<span class="htype">图片 · image</span></div>' +
+          '<div class="img-grid' + (chips.length === 1 ? ' one' : '') + '">' + tiles + '</div>' +
+          '<div class="bub-foot"><span class="ok">' + OK_ICO + '已发送 · ' + chips.length + ' 张图</span><span>image_key 已换取</span></div>' +
+        '</div>';
+    } else if (d.t === 'text' && !chips.length){
+      /* 纯文本 */
+      bubble = '<div class="bubble plain">' + renderText(text).replace(/<\/?p>/g, function(m){ return m === '<p>' ? '' : '<br>'; }).replace(/<br>$/, '') + '</div>';
+    } else {
+      /* 富文本 / 图文混排 */
+      var body = renderText(text || '（仅图片）');
+      if (chips.length){
+        var grid = chips.map(function(c){
+          var bg = chipThumb(c);
+          return '<div class="thumb ' + chipTone(c) + '"' + (bg ? ' style="' + bg + '"' : '') +
+                 '><span class="tn">' + esc(chipName(c)) + '</span></div>';
+        }).join('');
+        body += '<div class="img-grid' + (chips.length === 1 ? ' one' : '') + '" style="padding:0;margin-top:10px">' + grid + '</div>';
+      }
+      bubble =
+        '<div class="bubble">' +
+          '<div class="bub-head post">发送到 ' + esc(bot) + '<span class="htype">富文本 · post</span></div>' +
+          '<div class="bub-body">' + body + '</div>' +
+          '<div class="bub-foot"><span class="ok">' + OK_ICO + '已发送</span><span>200 OK · ' + (9 + Math.floor(Math.random()*18)) + ' ms</span></div>' +
+        '</div>';
+    }
+
+    art.innerHTML = botAv() + '<div class="col"><div class="stack">' + whoLine('out') + bubble + '</div>' +
+                    msgActs(['copy','resend','remove']) + '</div>';
+
+    $('#stream').appendChild(art);
+    el.innerHTML = '';
+    syncEmpty(el);
+    el.focus();
+    refresh();
+    refreshStats();
+    scrollToEnd();
+    toast('已发送到 ' + bot, '200 OK');
+  }
+
+  function scrollToEnd(){
+    var sc = $('#chatScroll');
+    requestAnimationFrame(function(){ sc.scrollTop = sc.scrollHeight; });
+  }
+
+  /* ================= 文件记录（进度写在历史里） ================= */
+  function fileCardHtml(name, size, dir, big){
+    return '<div class="filecard' + (dir === 'in' ? ' down' : '') + '">' +
+      '<div class="fc-main">' +
+        '<span class="fc-ico' + (dir === 'in' ? ' down' : '') + '" aria-hidden="true">' + FILE_ICO + '</span>' +
+        '<div class="fc-info"><b title="' + esc(name) + '">' + esc(name) + '</b>' +
+          '<div class="fmeta"><span>' + size + '</span>' +
+          '<span class="live" data-rate>' + (dir === 'in' ? '正在连接取回链接…' : '正在加密上传…') + '</span>' +
+          '<span data-pct>0%</span></div></div>' +
+        '<button class="fc-cancel" data-cancel title="取消传输" aria-label="取消传输">' + X_ICO + '</button>' +
+      '</div>' +
+      '<div class="fc-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i style="width:0%"></i></div>' +
+      '<div class="fc-bot"><span class="st" data-st>' +
+        (dir === 'in' ? '解密中，完成后直接存到「下载」目录' : '本机加密后上传，飞书侧只有密文') +
+      '</span><span class="bacts"><button data-cancel>取消</button></span></div>' +
+    '</div>';
+  }
+
+  function runTransfer(card, name, dir){
+    var pct = 0;
+    var bar = $('.fc-bar', card), fill = $('.fc-bar i', card);
+    var rate = $('[data-rate]', card), pctEl = $('[data-pct]', card), st = $('[data-st]', card);
+    var timer = setInterval(function(){
+      pct = Math.min(100, pct + (dir === 'in' ? 7 : 5));
+      fill.style.width = pct + '%';
+      bar.setAttribute('aria-valuenow', String(pct));
+      pctEl.textContent = pct + '%';
+      rate.textContent = dir === 'in'
+        ? '下载中 ' + (9 + Math.round(pct / 12)) + '.4 MB/s'
+        : '正在上传 ' + (18 + Math.round(pct / 8)) + '.8 MB/s';
+      if (pct >= 100){
+        clearInterval(timer);
+        finish();
+      }
+    }, 800);
+
+    function stop(){
+      clearInterval(timer);
+      card.classList.add('fail');
+      card.classList.remove('done');
+      st.innerHTML = WARN_ICO + (dir === 'in' ? '已取消 · 未保存' : '已取消 · 未发出链接');
+      $('.bacts', card).innerHTML = '<button data-retry>重试</button>';
+      var x = $('[data-cancel][title]', card);
+      if (x) x.style.display = 'none';
+      refreshStats();
+    }
+    function finish(){
+      card.classList.add('done');
+      card.classList.remove('fail');
+      var x = $('[data-cancel][title]', card);
+      if (x) x.style.display = 'none';
+      st.innerHTML = OK_ICO + (dir === 'in' ? '已解密并保存到「下载」目录' : '取回链接已发到 ' + esc(botName()) + ' · 30 分钟内有效');
+      $('.bacts', card).innerHTML = dir === 'in'
+        ? '<button data-open-dir>打开目录</button>'
+        : '<button class="hi" data-copy-link>复制链接</button>';
+      $('.fmeta', card).innerHTML = '<span>' + fmtSize(name.size || 0) + '</span>';
+      refreshStats();
+      if (dir === 'out') toast('文件已发出', '取回链接已发到 ' + botName());
+    }
+    card.addEventListener('click', function(e){
+      var b = e.target.closest('button');
+      if (!b) return;
+      e.stopPropagation();            /* 由卡片自己处理，避免外层委托重复响应 */
+      if (b.hasAttribute('data-cancel')){ stop(); }
+      else if (b.hasAttribute('data-retry')){ pickFile(); }
+      else if (b.hasAttribute('data-open-dir')){ toast('已打开下载目录'); }
+      else if (b.hasAttribute('data-copy-link')){
+        b.textContent = '已复制';
+        setTimeout(function(){ b.textContent = '复制链接'; }, 1600);
+        toast('取回链接已复制');
+      }
+    });
+    return { stop: stop, finish: finish };
+  }
+
+  $('#confirmSend').addEventListener('click', function(){
+    if (this.disabled) return;
+    var f = pendingFile || { name:'DoubaoWork_Arm64_2.25.17.dmg', size: 343.0 * 1048576 };
+    closeConfirm();
+    var art = newMsg('msg-file-' + (++sentSeq), 'out');
+    art.innerHTML = botAv() + '<div class="col"><div class="stack">' + whoLine('out') +
+      fileCardHtml(f.name, fmtSize(f.size), 'out') + '</div>' + msgActs(['remove']) + '</div>';
+    $('#stream').appendChild(art);
+    var card = $('.filecard', art);
+    card.setAttribute('data-od-id', 'file-' + sentSeq);
+    runTransfer(card, f, 'out');
+    refreshStats();
+    scrollToEnd();
+  });
+  $('#confirmCancel').addEventListener('click', closeConfirm);
+  $('#confirmClose').addEventListener('click', closeConfirm);
+  $('#confirmOverlay').addEventListener('click', function(e){ if (e.target === this) closeConfirm(); });
+
+  /* ================= 历史里的已有任务 ================= */
+  var upTask = $('#upTask'), dnTask = $('#downTask');
+  (function runExisting(){
+    /* 上传：从 28% 继续 */
+    var pct = 28, upStopped = false;
+    var upT = setInterval(function(){
+      if (upStopped) return;
+      pct = Math.min(100, pct + 4);
+      $('#upBar i').style.width = pct + '%';
+      $('#upBar').setAttribute('aria-valuenow', String(pct));
+      $('#upPct').textContent = pct + '%';
+      $('#upRate').textContent = '正在上传 ' + (20 + Math.round(pct / 9)) + '.8 MB/s';
+      if (pct >= 100){ clearInterval(upT); doneUp(); }
+    }, 900);
+    function doneUp(){
+      upTask.classList.add('done');
+      $('#upCancel').style.display = 'none';
+      $('.fc-bot .st', upTask).innerHTML = OK_ICO + '取回链接已发到 ' + esc(botName()) + ' · 30 分钟内有效';
+      $('.bacts', upTask).innerHTML = '<button class="hi" data-copy-link>复制链接</button>';
+      $('.fmeta', upTask).innerHTML = '<span>86.5 MB</span><span>已加密上传</span>';
+      refreshStats();
+      toast('内网部署包-v1.4.2.tar.gz 已发出', '取回链接已发到 ' + botName());
+    }
+    function stopUp(){
+      upStopped = true; clearInterval(upT);
+      upTask.classList.add('fail');
+      $('#upCancel').style.display = 'none';
+      $('.fc-bot .st', upTask).innerHTML = WARN_ICO + '已取消 · 未发出链接';
+      $('.bacts', upTask).innerHTML = '<button data-retry>重试</button>';
+      refreshStats();
+    }
+    ['#upCancel', '#upCancelAlt'].forEach(function(s){
+      var b = $(s);
+      b.addEventListener('click', function(e){ e.stopPropagation(); stopUp(); });
+    });
+    upTask.addEventListener('click', function(e){
+      var b = e.target.closest('button');
+      if (!b) return;
+      e.stopPropagation();
+      if (b.hasAttribute('data-retry')) pickFile();
+      else if (b.hasAttribute('data-copy-link')){ b.textContent = '已复制'; setTimeout(function(){ b.textContent = '复制链接'; }, 1600); toast('取回链接已复制'); }
+    });
+
+    /* 下载：从 67% 继续 */
+    var dpct = 67, dnStopped = false;
+    var dnT = setInterval(function(){
+      if (dnStopped) return;
+      dpct = Math.min(100, dpct + 6);
+      $('#downBar i').style.width = dpct + '%';
+      $('#downBar').setAttribute('aria-valuenow', String(dpct));
+      $('#dnPct').textContent = dpct + '%';
+      $('#dnRate').textContent = '下载中 ' + (9 + Math.round(dpct / 11)) + '.4 MB/s';
+      if (dpct >= 100){ clearInterval(dnT); doneDn(); }
+    }, 850);
+    function doneDn(){
+      dnTask.classList.add('done');
+      $('#dnCancel').style.display = 'none';
+      $('.fc-bot .st', dnTask).innerHTML = OK_ICO + '已解密并保存到「下载」目录';
+      $('.bacts', dnTask).innerHTML = '<button data-open-dir>打开目录</button>';
+      refreshStats();
+      toast('招标文件-终稿.zip 已保存', '下载目录');
+    }
+    function stopDn(){
+      dnStopped = true; clearInterval(dnT);
+      dnTask.classList.add('fail');
+      $('#dnCancel').style.display = 'none';
+      $('.fc-bot .st', dnTask).innerHTML = WARN_ICO + '已取消 · 未保存';
+      $('.bacts', dnTask).innerHTML = '<button data-retry>重试</button>';
+      refreshStats();
+    }
+    ['#dnCancel', '#dnCancelAlt'].forEach(function(s){
+      $(s).addEventListener('click', function(e){ e.stopPropagation(); stopDn(); });
+    });
+    dnTask.addEventListener('click', function(e){
+      var b = e.target.closest('button');
+      if (!b) return;
+      e.stopPropagation();
+      if (b.hasAttribute('data-retry')) toast('已重新开始下载');
+      else if (b.hasAttribute('data-open-dir')) toast('已打开下载目录');
+    });
+  })();
+
+  /* ================= 消息悬停操作 ================= */
+  $('#stream').addEventListener('click', function(e){
+    var btn = e.target.closest('.msg-acts button[data-act]');
+    if (!btn) return;
+    var art = btn.closest('.msg');
+    var act = btn.getAttribute('data-act');
+    if (act === 'remove'){
+      art.parentNode.removeChild(art);
+      refreshStats();
+      toast('已删除这条记录');
+    } else if (act === 'copy'){
+      var body = $('.bub-body, .bubble.plain', art);
+      if (body && navigator.clipboard) navigator.clipboard.writeText(body.innerText).catch(function(){});
+      toast('已复制到剪贴板');
+    } else {
+      toast('已重新发送到 ' + botName(), '200 OK');
+    }
+  });
+  $('#stream').addEventListener('click', function(e){
+    var b = e.target.closest('[data-copy-link]');
+    if (b){
+      b.textContent = '已复制';
+      setTimeout(function(){ b.textContent = '复制链接'; }, 1600);
+      toast('取回链接已复制');
+      return;
+    }
+    if (e.target.closest('[data-open-dir]')){ toast('已打开下载目录'); return; }
+    if (e.target.closest('[data-retry]')){ pickFile(); return; }
+    var card = e.target.closest('.card-btns button[data-card]');
+    if (card){
+      var kind = card.getAttribute('data-card');
+      var box = card.closest('.card-btns');
+      box.innerHTML = '<span style="font-size:12.5px;color:var(--muted)">' +
+        (kind === 'approve' ? '已批准，等待发布' : kind === 'reject' ? '已打回，等待修改' : '已标记稍后处理') +
+        '</span>';
+      toast(kind === 'approve' ? '已批准' : kind === 'reject' ? '已打回' : '已标记稍后处理');
+    }
+  });
+
+  /* ================= 统计 ================= */
+  function refreshStats(){
+    var all = $$('#stream .msg');
+    var out = all.filter(function(m){ return m.getAttribute('data-dir') === 'out'; }).length;
+    var inc = all.filter(function(m){ return m.getAttribute('data-dir') === 'in'; }).length;
+    $('#statUp').textContent = '发出 ' + out;
+    $('#statDown').textContent = '接收 ' + inc;
+    var empty = all.length === 0;
+    $('#chatEmpty').classList.toggle('show', empty);
+  }
+
+  /* ================= 清空记录 ================= */
+  var clearBtn = $('#clearBtn'), clearTimer = null;
+  clearBtn.addEventListener('click', function(){
+    if (!clearBtn.classList.contains('confirming')){
+      clearBtn.classList.add('confirming');
+      clearBtn.innerHTML = clearBtn.innerHTML.replace('清空记录', '再点一次确认');
+      clearTimer = setTimeout(resetClear, 4000);
+      return;
+    }
+    resetClear();
+    $('#stream').innerHTML = '';
+    refreshStats();
+    toast('消息记录已清空');
+  });
+  function resetClear(){
+    clearTimeout(clearTimer);
+    clearBtn.classList.remove('confirming');
+    clearBtn.innerHTML = clearBtn.innerHTML.replace('再点一次确认', '清空记录');
+  }
+
+  /* ================= 取回链接 ================= */
+  var retrieveBtn = $('#retrieveBtn'), retrievePop = $('#retrievePop');
+  retrieveBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    var show = !retrievePop.classList.contains('show');
+    retrievePop.classList.toggle('show', show);
+    retrieveBtn.setAttribute('aria-expanded', String(show));
+    if (show) $('#retrieveInput').focus();
+  });
+  retrievePop.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', function(){
+    retrievePop.classList.remove('show');
+    retrieveBtn.setAttribute('aria-expanded', 'false');
+    closeAddMenu();
+    toggleBotMenu(false);
+  });
+
+  function parseRetrieve(){
+    var v = ($('#retrieveInput').value || '').trim();
+    var hint = $('#retrieveHint');
+    hint.classList.remove('bad');
+    if (!v){
+      hint.classList.add('bad');
+      hint.textContent = '请先粘贴群里的取回链接，或链接 t= 后面那段载荷。';
+      return;
+    }
+    if (!/^https?:\/\/127\.0\.0\.1:\d+\/dl\?t=.+/.test(v) && !/^[A-Za-z0-9_-]{24,}$/.test(v)){
+      hint.classList.add('bad');
+      hint.textContent = '这不像青鸟的取回链接：应形如 http://127.0.0.1:9876/dl?t=… ，或直接是 t= 后面那段载荷。';
+      return;
+    }
+    hint.textContent = '链接有效，已开始下载，进度会出现在下方记录里。';
+    /* 生成一条接收记录 */
+    var art = newMsg('msg-recv-' + (++sentSeq), 'in');
+    art.innerHTML =
+      '<div class="av person" aria-hidden="true">付</div>' +
+      '<div class="col"><div class="stack"><div class="who"><b>付新峰</b>' +
+      '<span class="dir in">接收</span><span class="time">' + clock() + '</span></div>' +
+      fileCardHtml('项目周会纪要-0916.docx', '128 KB', 'in') +
+      '</div>' + msgActs(['remove']) + '</div>';
+    $('#stream').appendChild(art);
+    var card = $('.filecard', art);
+    runTransfer(card, { name:'项目周会纪要-0916.docx', size: 128 * 1024 }, 'in');
+    card.onclick = null;
+    refreshStats();
+    scrollToEnd();
+    $('#retrieveInput').value = '';
+    retrievePop.classList.remove('show');
+    retrieveBtn.setAttribute('aria-expanded', 'false');
+    toast('已开始下载', '取回链接有效');
+  }
+  $('#retrieveGo').addEventListener('click', parseRetrieve);
+  $('#retrieveInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') parseRetrieve(); });
+
+  /* 权限体检卡：把「缺哪一项」明确说出来，再给一条去申请的路 */
+  $('#permApply').addEventListener('click', function(){
+    toast('申请链接已复制', '飞书开放平台 · drive:drive（云空间）');
+  });
+
+  /* ================= 输入区工具 ================= */
+  var addMenu = $('#addMenu'), addBtn = $('#btnAdd');
+  function closeAddMenu(){
+    addMenu.classList.remove('show');
+    addBtn.setAttribute('aria-expanded', 'false');
+  }
+  addBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    var show = !addMenu.classList.contains('show');
+    addMenu.classList.toggle('show', show);
+    addBtn.setAttribute('aria-expanded', String(show));
+  });
+  addMenu.addEventListener('click', function(e){ e.stopPropagation(); });
+  $('#addImage').addEventListener('click', pickImages);
+  $('#addFile').addEventListener('click', pickFile);
+
+  $('#btnEmoji').addEventListener('click', function(){ insertNode(activeEd(), document.createTextNode('🙂')); });
+  $('#btnAt').addEventListener('click', function(){
+    var s = document.createElement('span');
+    s.className = 'at';
+    s.setAttribute('contenteditable', 'false');
+    s.textContent = '@所有人';
+    insertNode(activeEd(), s);
+  });
+  $('#btnSend').addEventListener('click', send);
+  $('#expandSend').addEventListener('click', send);
+
+  /* ================= 放大编辑 ================= */
+  var expand = $('#expand');
+  function openExpand(){
+    expEd.innerHTML = ed.innerHTML;
+    syncEmpty(expEd);
+    $('#expandTitle').value = '';
+    $('#expandFrom').textContent = isBlank(ed)
+      ? '输入框还是空的 · 收起时会带回去'
+      : '已带入输入框里的内容 · 收起时会带回去';
+    expand.classList.add('show');
+    refresh();
+    setTimeout(function(){ expEd.focus(); placeCaretEnd(expEd); }, 60);
+  }
+  function closeExpand(){
+    ed.innerHTML = expEd.innerHTML;
+    syncEmpty(ed);
+    expand.classList.remove('show');
+    refresh();
+    setTimeout(function(){ ed.focus(); placeCaretEnd(ed); }, 40);
+  }
+  function placeCaretEnd(el){
+    if (isBlank(el)) return;
+    var r = document.createRange();
+    r.selectNodeContents(el); r.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(r);
+    RANGES.set(el, r.cloneRange());
+  }
+  $('#btnExpand').addEventListener('click', openExpand);
+  $('#expandClose').addEventListener('click', closeExpand);
+  expand.addEventListener('click', function(e){ if (e.target === expand) closeExpand(); });
+
+  $$('.expand-bar .ebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      expEd.focus();
+      if (b.hasAttribute('data-md')){
+        document.execCommand(b.getAttribute('data-md'), false, null);
+        b.classList.toggle('on');
+      } else if (b.hasAttribute('data-block')){
+        document.execCommand('formatBlock', false, b.getAttribute('data-block') === 'blockquote' ? 'blockquote' : 'p');
+      } else if (b.hasAttribute('data-wrap')){
+        document.execCommand('insertHTML', false, '<code>代码</code>');
+      } else if (b.hasAttribute('data-link')){
+        document.execCommand('insertHTML', false, '<a href="#">链接文字</a>');
+      }
+      syncEmpty(expEd); refresh();
+    });
+  });
+  $('#expandAddImage').addEventListener('click', pickImages);
+  $('#expandAddFile').addEventListener('click', pickFile);
+
+  /* ================= 机器人下拉 ================= */
+  var botPickerBtn = $('#botPickerBtn'), botMenu = $('#botMenu');
+  function toggleBotMenu(force){
+    var show = typeof force === 'boolean' ? force : !botMenu.classList.contains('show');
+    botMenu.classList.toggle('show', show);
+    botPickerBtn.setAttribute('aria-expanded', String(show));
+  }
+  botPickerBtn.addEventListener('click', function(e){ e.stopPropagation(); toggleBotMenu(); });
+  botMenu.addEventListener('click', function(e){ e.stopPropagation(); });
+
+  $$('.bot-item').forEach(function(item){
+    item.addEventListener('click', function(){
+      $$('.bot-item').forEach(function(x){ x.classList.remove('active'); x.setAttribute('aria-checked','false'); });
+      item.classList.add('active');
+      item.setAttribute('aria-checked','true');
+      var name = item.getAttribute('data-name');
+      $('#currentBotName').textContent = name;
+      $('#currentBotHint').textContent = item.getAttribute('data-hint');
+      $('#convName').textContent = name;
+      $('#confirmTarget').textContent = name;
+      ed.setAttribute('data-ph', '发送给 ' + name);
+      ed.setAttribute('aria-label', '发送给 ' + name);
+      toggleBotMenu(false);
+      try { localStorage.setItem('qingniao-bot', name); } catch(err){}
+      toast('发送目标已切换为 ' + name);
+    });
+  });
+  (function restoreBot(){
+    var saved = null;
+    try { saved = localStorage.getItem('qingniao-bot'); } catch(err){}
+    if (!saved) return;
+    var item = $$('.bot-item').filter(function(x){ return x.getAttribute('data-name') === saved; })[0];
+    if (item) item.click();
+  })();
+
+  /* ================= 弹窗通用 ================= */
+  function openOverlay(o){ o.classList.add('show'); }
+  function closeOverlay(o){ o.classList.remove('show'); }
+  $$('.overlay').forEach(function(o){
+    o.addEventListener('click', function(e){ if (e.target === o) closeOverlay(o); });
+  });
+
+  var configOverlay = $('#configOverlay');
+  $('#openConfig').addEventListener('click', function(){ openOverlay(configOverlay); });
+  ['#closeConfig','#cancelConfig','#saveConfig'].forEach(function(s){
+    $(s).addEventListener('click', function(){ closeOverlay(configOverlay); });
+  });
+  $('#toggleSecret').addEventListener('click', function(){
+    var i = $('#secretInput'), showing = i.type === 'text';
+    i.type = showing ? 'password' : 'text';
+    this.textContent = showing ? '显示' : '隐藏';
+  });
+  var tabToPane = { app:'paneApp', agent:'paneAgent', transfer:'paneTransfer', pref:'panePref', about:'paneAbout' };
+  $$('#configOverlay .nav button').forEach(function(b){
+    b.addEventListener('click', function(){
+      $$('#configOverlay .nav button').forEach(function(x){ x.classList.remove('active'); });
+      b.classList.add('active');
+      var target = tabToPane[b.getAttribute('data-tab')];
+      $$('#configOverlay .pane').forEach(function(p){ p.classList.toggle('active', p.id === target); });
+    });
+  });
+  $$('#paneAgent .agent-card').forEach(function(card){
+    card.addEventListener('click', function(e){
+      var btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      if (btn.getAttribute('data-action').indexOf('install') === 0) card.classList.add('installed');
+      else card.classList.remove('installed');
+    });
+  });
+
+  var manageOverlay = $('#manageOverlay');
+  function openManage(){ openOverlay(manageOverlay); }
+  $('#menuGoManage').addEventListener('click', function(){ toggleBotMenu(false); openManage(); });
+  $('#closeManage').addEventListener('click', function(){ closeOverlay(manageOverlay); });
+  $('#closeManageFooter').addEventListener('click', function(){ closeOverlay(manageOverlay); });
+
+  var botList = $('#botList');
+  function closeAllBotSlots(except){
+    $$('.bot-list-item', botList).forEach(function(x){
+      if (x !== except) x.classList.remove('editing','confirming-delete');
+    });
+  }
+  function refreshBotCount(){
+    var n = $$('.bot-list-item', botList).length;
+    $('#manageOverlay footer .left').textContent = '共 ' + n + ' 个机器人';
+    $('#botMenu .bot-menu-title').textContent = '发送目标 · ' + n + ' 个机器人';
+  }
+  botList.addEventListener('click', function(e){
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var item = btn.closest('.bot-list-item');
+    if (!item) return;
+    var action = btn.getAttribute('data-action');
+    if (action === 'edit'){
+      closeAllBotSlots(item); item.classList.remove('confirming-delete'); item.classList.add('editing');
+      var first = $('.bot-list-edit input', item);
+      if (first) setTimeout(function(){ first.focus(); }, 0);
+    } else if (action === 'save-edit'){
+      var inputs = $$('.bot-list-edit .edit-grid input', item);
+      var name = (inputs[0] && inputs[0].value.trim()) || item.getAttribute('data-bot');
+      $('.bot-list-head .meta b', item).textContent = name;
+      item.setAttribute('data-bot', name);
+      item.classList.remove('editing');
+    } else if (action === 'cancel-edit'){
+      item.classList.remove('editing');
+    } else if (action === 'delete'){
+      closeAllBotSlots(item); item.classList.remove('editing'); item.classList.add('confirming-delete');
+    } else if (action === 'cancel-delete'){
+      item.classList.remove('confirming-delete');
+    } else if (action === 'confirm-delete'){
+      item.parentNode.removeChild(item);
+      refreshBotCount();
+    }
+  });
+
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Escape') return;
+    if (expand.classList.contains('show')){ closeExpand(); return; }
+    if (retrievePop.classList.contains('show')){
+      retrievePop.classList.remove('show'); retrieveBtn.setAttribute('aria-expanded','false'); return;
+    }
+    closeAddMenu();
+    $$('.overlay').forEach(function(o){ o.classList.remove('show'); });
+  });
+
+  /* ================= 偏好：主题 / 开关 / 分段 ================= */
+  var THEME_KEY = 'qingniao-theme';
+  var themeMql = window.matchMedia('(prefers-color-scheme: dark)');
+  function resolveTheme(pref){
+    if (pref === 'dark' || pref === 'light') return pref;
+    return themeMql.matches ? 'dark' : 'light';
+  }
+  function applyTheme(pref){
+    document.documentElement.dataset.theme = resolveTheme(pref);
+    document.documentElement.dataset.themePref = pref;
+  }
+  function readSavedTheme(){ try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch(e){ return 'auto'; } }
+  function saveTheme(pref){ try { localStorage.setItem(THEME_KEY, pref); } catch(e){} }
+  var initPref = readSavedTheme();
+  applyTheme(initPref);
+  $$('.theme-card').forEach(function(c){
+    var on = c.getAttribute('data-theme') === initPref;
+    c.classList.toggle('active', on);
+    c.setAttribute('aria-pressed', String(on));
+    c.addEventListener('click', function(){
+      $$('.theme-card').forEach(function(x){ x.classList.remove('active'); x.setAttribute('aria-pressed','false'); });
+      c.classList.add('active'); c.setAttribute('aria-pressed','true');
+      applyTheme(c.getAttribute('data-theme'));
+      saveTheme(c.getAttribute('data-theme'));
+    });
+  });
+  themeMql.addEventListener('change', function(){
+    if ((document.documentElement.dataset.themePref || 'auto') === 'auto') applyTheme('auto');
+  });
+  $$('.switch').forEach(function(s){ s.addEventListener('click', function(){ s.classList.toggle('on'); }); });
+  $$('.pref-seg').forEach(function(seg){
+    $$('button', seg).forEach(function(b){
+      b.addEventListener('click', function(){
+        $$('button', seg).forEach(function(x){ x.classList.remove('active'); });
+        b.classList.add('active');
+      });
+    });
+  });
+
+  /* ================= 配置 · 文件传输 pane ================= */
+  var OCCUPIED = { '80':'httpd', '443':'httpd', '3000':'node', '5173':'vite', '8080':'java' };
+  $('#portRestart').addEventListener('click', function(){
+    var p = ($('#portInput').value || '').trim();
+    var now = $('#portNow'), lbl = $('.plbl', now), bound = $('#portBound');
+    if (!/^\d+$/.test(p) || +p < 1024 || +p > 65535){
+      now.classList.add('err'); lbl.textContent = '端口无效';
+      bound.textContent = '请填 1024–65535 的高位端口'; return;
+    }
+    if (OCCUPIED[p]){
+      now.classList.add('err'); lbl.textContent = '端口被占用';
+      bound.textContent = p + ' 已被 ' + OCCUPIED[p] + ' 占用，换一个再重启'; return;
+    }
+    now.classList.remove('err'); lbl.textContent = '实际绑定';
+    bound.textContent = '127.0.0.1:' + p;
+  });
+
+  var keyCard = $('#keyCard');
+  var KEY_PLAIN = '7f3ac91e5b284d06a1c8e93f47d2b60518aa73cd9e4f1b82c057d6a3e9418fbc';
+  var KEY_MASK = '•••• •••• •••• •••• •••• •••• •••• ••••';
+  keyCard.addEventListener('click', function(e){
+    var b = e.target.closest('[data-key]');
+    if (!b) return;
+    keyCard.setAttribute('data-slot', keyCard.getAttribute('data-slot') === b.getAttribute('data-key') ? '' : b.getAttribute('data-key'));
+  });
+  $('#keyReveal').addEventListener('click', function(){
+    var code = $('#keyPlain'), masked = code.classList.contains('masked');
+    code.classList.toggle('masked', !masked);
+    code.textContent = masked ? KEY_PLAIN : KEY_MASK;
+    this.textContent = masked ? '隐藏' : '显示';
+  });
+  $('#keyCopy').addEventListener('click', function(e){
+    if (navigator.clipboard) navigator.clipboard.writeText(KEY_PLAIN).catch(function(){});
+    var b = e.currentTarget; b.textContent = '已复制';
+    setTimeout(function(){ b.textContent = '复制'; }, 1600);
+  });
+  $('#keyImportInput').addEventListener('input', function(){
+    var v = this.value.trim(), box = $('#keyImportFp'), span = $('span', box);
+    if (v === KEY_PLAIN){
+      box.classList.remove('bad');
+      span.innerHTML = '指纹 <code>a1b2c3d4</code> —— 与另一台机器显示的一致，可以确认导入';
+    } else if (/^[0-9a-fA-F]{64}$/.test(v)){
+      box.classList.add('bad');
+      span.innerHTML = '指纹 <code>' + v.slice(0,8).toLowerCase() + '</code> —— 与另一台机器显示的不一致，请逐位核对后再导入';
+    } else {
+      box.classList.add('bad');
+      span.textContent = '还不是一把完整的密钥：需要 64 位十六进制字符，当前 ' + v.length + ' 位';
+    }
+  });
+
+  /* ================= 拖拽接收 ================= */
+  var dropzone = $('#dropzone'), dragDepth = 0;
+  function hasFiles(e){
+    return !!(e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0);
+  }
+  function showDrop(on){
+    dropzone.classList.toggle('show', on);
+    dropzone.setAttribute('aria-hidden', String(!on));
+  }
+  window.addEventListener('dragenter', function(e){ if (!hasFiles(e)) return; dragDepth++; showDrop(true); });
+  window.addEventListener('dragover', function(e){ if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('dragleave', function(){ dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) showDrop(false); });
+  window.addEventListener('drop', function(e){
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    dragDepth = 0; showDrop(false);
+    var f = e.dataTransfer.files[0];
+    if (f.type && f.type.indexOf('image/') === 0){
+      var rd = new FileReader();
+      rd.onload = function(ev){ insertChip(activeEd(), f.name, ev.target.result); };
+      rd.readAsDataURL(f);
+    } else {
+      handleFile(f);
+    }
+  });
+
+  /* ================= 初始化 ================= */
+  refreshStats();
+  refresh();
+  scrollToEnd();
+})();
+</script>
+
+</body>
+</html>

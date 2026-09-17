@@ -1,0 +1,10 @@
+# 本项目局部 cargo 配置：crates.io 经 rsproxy 镜像（直连 index.crates.io 在当前网络不可达）
+# 仅作用于本项目，不影响全局 ~/.cargo/config
+[source.crates-io]
+replace-with = 'rsproxy-sparse'
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[registries.rsproxy]
+index = "sparse+https://rsproxy.cn/index/"
