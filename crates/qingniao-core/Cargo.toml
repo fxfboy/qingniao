@@ -13,3 +13,5 @@ regex = "1"
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
+# webhook 发送 / 图片上传（blocking，与 APP 同依赖不重复编译）
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "multipart"] }
