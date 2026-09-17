@@ -96,15 +96,20 @@ jobs:
           prerelease: false
           args: --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.release.conf.json
 
-      - name: Smoke test（嵌入资源可运行）+ 独立 CLI zip
+      - name: Smoke test（挂载 DMG 验证嵌入 CLI）+ 独立 CLI zip
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
-          APP_BUNDLE=$(find target/aarch64-apple-darwin/release/bundle/macos -maxdepth 1 -name "*.app" | head -1)
-          test -n "$APP_BUNDLE" || { echo "::error::未找到 .app 产物"; exit 1; }
+          DMG=$(find target/aarch64-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
+          test -n "$DMG" || { echo "::error::未找到 DMG 产物"; exit 1; }
+          MNT=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
+          APP_BUNDLE=$(find "$MNT" -maxdepth 2 -name "*.app" | head -1)
+          test -n "$APP_BUNDLE" || { echo "::error::DMG 内未找到 .app"; exit 1; }
           EMBEDDED="$APP_BUNDLE/Contents/Resources/bin/qingniao-cli"
           test -f "$EMBEDDED" || { echo "::error::CLI 未嵌入 .app 资源"; exit 1; }
           lipo -archs "$EMBEDDED" | grep -q arm64
           "$EMBEDDED" --version
+          hdiutil detach "$MNT"
           # 独立分发包：安装时复制为 ~/.local/bin/qingniao（unsigned，见 D16）
           STAGE=$(mktemp -d)
           cp target/aarch64-apple-darwin/release/qingniao-cli "$STAGE/qingniao"
