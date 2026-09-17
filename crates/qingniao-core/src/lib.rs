@@ -6,3 +6,4 @@
 pub mod config;
 pub mod message;
 pub mod send;
+pub mod skills;
