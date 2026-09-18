@@ -568,12 +568,30 @@ fn transfer_cancel(app: tauri::AppHandle, task_id: String) -> Result<(), String>
 fn transfer_parse_payload(app: tauri::AppHandle, input: String) -> Result<serde_json::Value, String> {
     let state = app.state::<AppState>();
     let engine = state.engine.get().ok_or("传输引擎未初始化")?;
-    let ev = engine.evaluate_payload(&input)?;
-    let sess = engine.create_session(&input, ev)?;
+    let ev = match engine.evaluate_payload(&input) {
+        Ok(ev) => ev,
+        Err(e) => {
+            // 失败也要留痕：兜底入口此前既无 toast 也无日志，出问题只能靠猜
+            write_log(&app, LV_WARN, &format!("transfer_parse_payload: 解析失败（输入 {} 字节）: {e}", input.len()));
+            return Err(e);
+        }
+    };
+    let fingerprint = ev.fingerprint.clone();
+    let sess = engine.create_session(&input, ev).map_err(|e| {
+        write_log(&app, LV_WARN, &format!("transfer_parse_payload: 创建会话失败: {e}"));
+        e
+    })?;
+    write_log(
+        &app,
+        LV_INFO,
+        &format!("transfer_parse_payload: 会话已创建 name={} size={} fingerprint={}", sess.name, sess.size, &fingerprint[..8.min(fingerprint.len())]),
+    );
     Ok(serde_json::json!({
         "session_id": sess.handle,
         "name": sess.name,
         "size": sess.size,
+        // 回传指纹：前端据此与 transfer://downloaded 事件去重（同一文件不会落两条记录）
+        "fingerprint": fingerprint,
     }))
 }
 

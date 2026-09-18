@@ -1485,7 +1485,7 @@
                   </div>
                 </div>
                 <div class="fc-bot">
-                  <span class="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>取回链接已发到 TK · 30 分钟内有效</span>
+                  <span class="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>取回链接已发到 TK · 10 分钟内有效</span>
                   <span class="bacts"><button data-copy-link>复制链接</button></span>
                 </div>
               </div>
@@ -1902,7 +1902,7 @@
       </div>
       <div class="e2e-note">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        <span>端到端加密：文件在这台机器上加密后才上传，群里出现的是一条取回链接，链接 30 分钟内有效。</span>
+        <span>端到端加密：文件在这台机器上加密后才上传，群里出现的是一条取回链接，链接 10 分钟内有效。</span>
       </div>
     </div>
     <footer>
@@ -2819,7 +2819,7 @@
       card.classList.remove('fail');
       var x = $('[data-cancel][title]', card);
       if (x) x.style.display = 'none';
-      st.innerHTML = OK_ICO + (dir === 'in' ? '已解密并保存到「下载」目录' : '取回链接已发到 ' + esc(botName()) + ' · 30 分钟内有效');
+      st.innerHTML = OK_ICO + (dir === 'in' ? '已解密并保存到「下载」目录' : '取回链接已发到 ' + esc(botName()) + ' · 10 分钟内有效');
       $('.bacts', card).innerHTML = dir === 'in'
         ? '<button data-open-dir>打开目录</button>'
         : '<button class="hi" data-copy-link>复制链接</button>';
@@ -2878,7 +2878,7 @@
     function doneUp(){
       upTask.classList.add('done');
       $('#upCancel').style.display = 'none';
-      $('.fc-bot .st', upTask).innerHTML = OK_ICO + '取回链接已发到 ' + esc(botName()) + ' · 30 分钟内有效';
+      $('.fc-bot .st', upTask).innerHTML = OK_ICO + '取回链接已发到 ' + esc(botName()) + ' · 10 分钟内有效';
       $('.bacts', upTask).innerHTML = '<button class="hi" data-copy-link>复制链接</button>';
       $('.fmeta', upTask).innerHTML = '<span>86.5 MB</span><span>已加密上传</span>';
       refreshStats();

@@ -39,7 +39,7 @@ pub struct Engine {
     work_dir: PathBuf,
     pub quota: Arc<Quota>,
     tasks: Mutex<HashMap<String, Arc<TaskHandle>>>,
-    /// 待确认下载会话：handle → PendingDownload（仅内存，10 min 过期）
+    /// 待确认下载会话：handle → PendingDownload（仅内存，随链接新鲜度窗口过期）
     sessions: Mutex<HashMap<String, PendingDownload>>,
     /// per-指纹状态（§9.4 单消费）：Downloading / Done
     fp_state: Mutex<HashMap<String, FpState>>,
@@ -75,6 +75,8 @@ pub struct PendingDownload {
     pub app_secret: String,
     pub download_dir: String,
     pub created_at: i64,
+    /// 会话有效期截止（= payload.ts + 新鲜度窗口，与链接有效期同源）
+    pub expires_at: i64,
     /// 领取后分配的任务标识 / 取消旗标
     pub task_id: Option<String>,
     pub cancel: Option<Arc<AtomicBool>>,
@@ -120,7 +122,15 @@ pub struct SessionView {
     pub name: String,
     pub size: u64,
     pub created_at: i64,
+    /// 会话有效期截止（确认页「剩余有效期」倒计时同源）
+    pub expires_at: i64,
     pub download_dir: String,
+}
+
+/// 会话有效期 = payload.ts + 新鲜度窗口：确认页倒计时必须与「链接 N 分钟内有效」同源，
+/// 否则页面倒数与群消息承诺的时长不一致（且过期后再按「开始下载」必然失败）。
+fn session_expires_at(ts: i64) -> i64 {
+    ts + crypto::FRESHNESS_WINDOW_SECS
 }
 
 /// payload 校验结果（无副作用）
@@ -277,7 +287,10 @@ impl Engine {
                     }
                     validate_metadata(&env.meta).map_err(|e| format!("载荷不合法：{e}"))?;
                     if !crypto::is_fresh(env.meta.ts, crypto::now_unix()) {
-                        return Err("链接已过期（ts 新鲜度窗口 30 分钟）".into());
+                        return Err(format!(
+                            "链接已过期（ts 新鲜度窗口 {} 分钟）",
+                            crypto::FRESHNESS_WINDOW_MINUTES
+                        ));
                     }
                     return Ok(Evaluated {
                         fingerprint: crypto::payload_fingerprint(&payload),
@@ -296,7 +309,7 @@ impl Engine {
         }))
     }
 
-    /// 创建一次性确认会话（handle 10 min，仅内存）
+    /// 创建一次性确认会话（handle，仅内存，活到链接新鲜度窗口结束）
     pub fn create_session(&self, payload: &str, ev: Evaluated) -> Result<SessionView, String> {
         let payload = extract_payload(payload)?;
         // 解出 meta 供确认页展示（key 已在 evaluate 时验证）
@@ -306,11 +319,12 @@ impl Engine {
         let download_dir = download_dir_of(&self.app)?;
         let handle = crypto::hex(&crypto::random_bytes(16));
         let now = crypto::now_unix();
-        // GC 过期会话
+        let expires_at = session_expires_at(env.meta.ts);
+        // GC 过期会话（按链接有效期，与确认页倒计时同源）
         self.sessions
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .retain(|_, s| now - s.created_at <= crate::local_server::HANDLE_TTL_SECS);
+            .retain(|_, s| now <= s.expires_at);
         let pending = PendingDownload {
             handle: handle.clone(),
             fingerprint: ev.fingerprint,
@@ -320,6 +334,7 @@ impl Engine {
             app_secret: self.app_secret_of()?,
             download_dir,
             created_at: now,
+            expires_at,
             task_id: None,
             cancel: None,
         };
@@ -328,6 +343,7 @@ impl Engine {
             name: pending.env.meta.name.clone(),
             size: pending.env.meta.size,
             created_at: now,
+            expires_at,
             download_dir: pending.download_dir.clone(),
         };
         self.sessions
@@ -343,7 +359,7 @@ impl Engine {
         let pending = {
             let mut sessions = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
             let p = sessions.get(handle).cloned().ok_or(ClaimError::NotFound)?;
-            if now - p.created_at > crate::local_server::HANDLE_TTL_SECS {
+            if now > p.expires_at {
                 sessions.remove(handle);
                 return Err(ClaimError::Expired);
             }
@@ -700,11 +716,18 @@ pub fn download_dir_of(app: &AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
-/// 从链接（…/dl?t=payload）或裸 payload 提取载荷（§9.2 兜底入口两种形态）
+/// 从链接（…/dl?t=payload）、被包装/百分号编码的链接，或裸 payload 提取载荷（§9.2 兜底入口）
+///
+/// 飞书客户端可能把 href 包成跳转链接（`…?url=http%3A%2F%2F127.0.0.1%3A9876%2Fdl%3Ft%3D…`），
+/// 这类形态先解一层百分号编码再找 `t=`；payload 本体是 base64url（无 `%`），解码对裸载荷是恒等变换。
 pub fn extract_payload(input: &str) -> Result<String, String> {
     let s = input.trim();
-    if let Some(pos) = s.find("t=") {
-        let raw = &s[pos + 2..];
+    if s.is_empty() {
+        return Err("载荷为空".into());
+    }
+    let decoded = percent_decode(s);
+    if let Some(pos) = decoded.find("t=") {
+        let raw = &decoded[pos + 2..];
         let end = raw.find('&').unwrap_or(raw.len());
         let t = &raw[..end];
         if t.is_empty() {
@@ -712,10 +735,33 @@ pub fn extract_payload(input: &str) -> Result<String, String> {
         }
         return Ok(t.to_string());
     }
-    if s.is_empty() {
-        return Err("载荷为空".into());
+    // 没有 t= 参数：只有「整串就是个 base64url 载荷」才按裸载荷处理；
+    // 粘成消息正文或别的链接时给出可操作提示，而不是含糊的「载荷不合法」
+    if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("没找到取回载荷：请右键取回链接选「复制链接地址」，或只粘 t= 后面那段；消息正文里不含链接".into());
     }
     Ok(s.to_string())
+}
+
+/// 仅解 `%XX`（不把 `+` 当空格：base64url 里 `+` 无特殊语义）
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let (Some(hi), Some(lo)) =
+                ((b[i + 1] as char).to_digit(16), (b[i + 2] as char).to_digit(16))
+            {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
 }
 
 fn dedup_path(dir: &std::path::Path, name: &str) -> PathBuf {
@@ -918,4 +964,48 @@ fn engine_quota(app: &tauri::AppHandle) -> Result<Arc<Quota>, String> {
 pub(crate) fn write_part_chunk(part: &mut std::fs::File, off: u64, data: &[u8]) -> Result<(), String> {
     part.seek(SeekFrom::Start(off)).map_err(|e| format!("seek 失败: {e}"))?;
     part.write_all(data).map_err(|e| format!("写 .part 失败: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_payload_accepts_link_and_bare_payload() {
+        let payload = "abc-_123XYZ";
+        assert_eq!(extract_payload(&format!("http://127.0.0.1:9876/dl?t={payload}")).unwrap(), payload);
+        assert_eq!(extract_payload(payload).unwrap(), payload);
+        // 前后空白与「整条粘贴」中的多余参数都不影响取 t
+        assert_eq!(extract_payload(&format!("  http://127.0.0.1:9876/dl?t={payload}&x=1  ")).unwrap(), payload);
+    }
+
+    #[test]
+    fn extract_payload_decodes_wrapped_link() {
+        // 飞书客户端把 href 包成跳转链接（url= 参数里的链接被百分号编码）
+        let payload = "abc-_123XYZ";
+        let wrapped = format!(
+            "https://applink.feishu.cn/client/web_url/open?url=http%3A%2F%2F127.0.0.1%3A9876%2Fdl%3Ft%3D{payload}&mode=window"
+        );
+        assert_eq!(extract_payload(&wrapped).unwrap(), payload);
+    }
+
+    #[test]
+    fn extract_payload_rejects_empty_and_missing_payload() {
+        assert!(extract_payload("   ").is_err());
+        assert!(extract_payload("http://127.0.0.1:9876/dl?t=").is_err());
+        // 粘成消息正文 / 别的链接 → 明确提示，而不是拿去当载荷解密
+        let msg = "kimi-code-win32-x64.zip 点击取回（53.8 MB · 链接 10 分钟内有效）";
+        assert!(extract_payload(msg).is_err());
+        assert!(extract_payload("https://xxx.feishu.cn/file/abc").is_err());
+    }
+
+    #[test]
+    fn session_expiry_tracks_freshness_window() {
+        let ts = crypto::now_unix();
+        let expires = session_expires_at(ts);
+        assert_eq!(expires - ts, crypto::FRESHNESS_WINDOW_SECS);
+        // 链接新鲜度窗口内创建 → 会话未过期；窗口外 → 已过期
+        assert!(crypto::now_unix() <= expires);
+        assert!(crypto::now_unix() > session_expires_at(crypto::now_unix() - crypto::FRESHNESS_WINDOW_SECS - 1));
+    }
 }

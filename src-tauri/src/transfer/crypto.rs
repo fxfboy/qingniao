@@ -307,8 +307,11 @@ pub fn validate_metadata(meta: &Metadata) -> Result<(), String> {
 
 /* ===================== ts 新鲜度（D8） ===================== */
 
-/// 默认新鲜度窗口 30 分钟
-pub const FRESHNESS_WINDOW_SECS: i64 = 30 * 60;
+/// 新鲜度窗口 10 分钟（链接有效期；确认页倒计时与全部用户可见文案的唯一口径来源）
+pub const FRESHNESS_WINDOW_SECS: i64 = 10 * 60;
+
+/// 新鲜度窗口的分钟数（文案展示用，避免各处再写死数字）
+pub const FRESHNESS_WINDOW_MINUTES: i64 = FRESHNESS_WINDOW_SECS / 60;
 
 pub fn is_fresh(ts: i64, now_unix: i64) -> bool {
     (now_unix - ts).abs() <= FRESHNESS_WINDOW_SECS
@@ -462,7 +465,9 @@ mod tests {
     fn freshness_window() {
         let now = now_unix();
         assert!(is_fresh(now - 60, now));
-        assert!(!is_fresh(now - 31 * 60, now));
-        assert!(!is_fresh(now + 31 * 60, now));
+        // 窗口边界按常量推导，改窗口时测试跟着走
+        assert!(is_fresh(now - FRESHNESS_WINDOW_SECS, now));
+        assert!(!is_fresh(now - FRESHNESS_WINDOW_SECS - 1, now));
+        assert!(!is_fresh(now + FRESHNESS_WINDOW_SECS + 1, now));
     }
 }
