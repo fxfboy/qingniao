@@ -11,7 +11,7 @@ use crate::transfer::crypto::{
     self, open_chunk, open_payload, seal_chunk, seal_payload, validate_metadata, ChunkMeta,
     Envelope, Metadata, CHUNK_SIZE, MAX_FILE_SIZE, NONCE_LEN,
 };
-use crate::transfer::feishu::{build_transfer_post, send_webhook_json, FeishuClient};
+use crate::transfer::feishu::{build_transfer_card, send_webhook_json, FeishuClient};
 use crate::transfer::quota::Quota;
 use base64::Engine as _;
 use rand::RngCore;
@@ -862,6 +862,8 @@ fn upload_inner(
         ts: crypto::now_unix(),
         chunks: chunk_metas,
     };
+    // 卡片 footer 展示的发送时间与新鲜度窗口同源（§8.3）
+    let sent_ts = meta.ts;
     let env = Envelope {
         v: crypto::PROTO_VERSION,
         kid: crypto::fingerprint(key),
@@ -877,8 +879,8 @@ fn upload_inner(
     let link = format!("http://127.0.0.1:{bound_port}/dl?t={payload}");
 
     // 6. 仅链接形式发群（D3/D4）；webhook 不计入月度额度
-    let post = build_transfer_post(&display_name, total, &link);
-    let (status, body) = send_webhook_json(&req.webhook_url, &post, Some(&req.webhook_secret))?;
+    let card = build_transfer_card(&display_name, total, &link, sent_ts);
+    let (status, body) = send_webhook_json(&req.webhook_url, &card, Some(&req.webhook_secret))?;
     if !(200..300).contains(&status) {
         return Err(format!("取回链接发送失败：HTTP {status} {body}"));
     }
