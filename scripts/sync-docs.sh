@@ -7,12 +7,17 @@
 # 用法：
 #   ./scripts/sync-docs.sh            # 同步全部文档
 #   ./scripts/sync-docs.sh --check    # 只检查 lark-cli 可用性
+#
+# 身份：默认 --as bot（机器人身份对这些文档有读权限，且不需要用户 token）；
+# 若要以本人身份同步（例如机器人权限被收回），用 LARK_AS=user 运行，
+# 并先 `lark-cli auth login --domain docs,drive,wiki`.
 # =============================================================
 set -euo pipefail
 
 # 项目根目录（脚本所在目录的上一级）
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCS_DIR="${ROOT_DIR}/docs"
+LARK_AS="${LARK_AS:-bot}"
 
 # 知识库文档清单：本地文件名 | 飞书 docx URL
 # 新增文档时在此追加一行即可
@@ -41,23 +46,39 @@ fi
 
 mkdir -p "${DOCS_DIR}"
 
-echo "==> 开始同步飞书文档到 ${DOCS_DIR}"
+# lark-cli 只接受「当前目录内的相对输出路径」，绝对路径会被判为 unsafe output path
+cd "${ROOT_DIR}"
+
+echo "==> 开始同步飞书文档到 ${DOCS_DIR}（身份：${LARK_AS}）"
 
 ok_count=0
 for entry in "${DOC_MAP[@]}"; do
   name="${entry%%|*}"
   url="${entry##*|}"
-  echo "  - 导出：${name}"
-  if lark-cli drive +export \
-      --url "${url}" \
+  # lark-cli ≥1.0.47 的 drive +export 只接受 --token/--doc-type（旧版 --url 已移除），
+  # 这里从 URL 解析：https://<tenant>.feishu.cn/<doc-type>/<token>
+  token="${url##*/}"
+  case "${url}" in
+    */docx/*)   doc_type="docx" ;;
+    */doc/*)    doc_type="doc" ;;
+    */sheets/*) doc_type="sheet" ;;
+    */base/*)   doc_type="bitable" ;;
+    */slides/*) doc_type="slides" ;;
+    *)          doc_type="docx" ;;
+  esac
+  echo "  - 导出：${name}（${doc_type}）"
+  if err=$(lark-cli drive +export \
+      --token "${token}" \
+      --doc-type "${doc_type}" \
       --file-extension markdown \
       --file-name "${name}.md" \
-      --output-dir "${DOCS_DIR}" \
+      --output-dir docs \
       --overwrite \
-      --as user >/dev/null 2>&1; then
+      --as "${LARK_AS}" 2>&1); then
     ok_count=$((ok_count + 1))
   else
-    echo "    [失败] ${name} 导出失败，跳过" >&2
+    # 打印真实报错，否则出问题只能看到「导出失败」
+    echo "    [失败] ${name}：$(printf '%s' "${err}" | tr '\n' ' ' | cut -c1-300)" >&2
   fi
 done
 
