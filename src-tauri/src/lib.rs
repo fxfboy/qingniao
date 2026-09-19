@@ -325,15 +325,51 @@ fn data_dir_display(dir: &Path) -> String {
     abbrev_path(dir, prefix.as_deref(), label)
 }
 
-/// 「关于」面板的数据目录：取 APP 真实使用的 app_config_dir（各平台不同），
-/// 前端不再硬编码 macOS 路径
+/// 「关于」页「最近更新」= 这份产物的打包时刻，取 APP 可执行文件的修改时间，
+/// 按运行机器的本地时区格式化成 `YYYY-MM-DD HH:MM`。
+///
+/// 刻意不用版本号推日期、也不用编译期常量：同一个版本可能被多次打包，
+/// 展示的必须是**这一份产物**是什么时候打出来的。走文件时间的好处是
+/// 打包链路里的每一步（链接 → 拷进 .app / 拷进 zip 暂存目录）都会刷新它，
+/// 且该值随后续拷贝、解压一路保留，与版本号无关。
+fn build_time_label() -> String {
+    let Ok(exe) = std::env::current_exe() else {
+        return String::new();
+    };
+    let Ok(modified) = std::fs::metadata(&exe).and_then(|m| m.modified()) else {
+        return String::new();
+    };
+    let Ok(since_epoch) = modified.duration_since(std::time::UNIX_EPOCH) else {
+        return String::new();
+    };
+    let Ok(utc) = time::OffsetDateTime::from_unix_timestamp(since_epoch.as_secs() as i64) else {
+        return String::new();
+    };
+    let at = time::UtcOffset::current_local_offset()
+        .map(|off| utc.to_offset(off))
+        .unwrap_or(utc);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        at.year(),
+        at.month() as u8,
+        at.day(),
+        at.hour(),
+        at.minute()
+    )
+}
+
+/// 「关于」面板的动态元信息：数据目录（取 APP 真实使用的 app_config_dir，各平台不同）
+/// 与最近更新的打包时间；前端不再硬编码路径与日期
 #[tauri::command]
-fn app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
+fn about_info(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let dir = app
         .path()
         .app_config_dir()
         .map_err(|e| format!("无法定位数据目录: {e}"))?;
-    Ok(data_dir_display(&dir))
+    Ok(serde_json::json!({
+        "data_dir": data_dir_display(&dir),
+        "updated_at": build_time_label(),
+    }))
 }
 
 /// 一次性迁移：新版配置目录改为 qingniao 后，若旧目录 com.qingniao.app 中
@@ -1631,7 +1667,7 @@ pub fn run() {
             uninstall_skills,
             cli_install_status,
             install_cli,
-            app_data_dir,
+            about_info,
             key_status,
             key_generate,
             key_export,
@@ -1825,6 +1861,20 @@ mod agent_install_tests {
             "没有候选命中 → None，交由 UI 显示未打包"
         );
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 最近更新 = 可执行文件修改时间，按本地时区格式化成 16 字符 `YYYY-MM-DD HH:MM`
+    #[test]
+    fn build_time_label_uses_exe_mtime() {
+        let s = build_time_label();
+        assert_eq!(s.len(), 16, "应为 YYYY-MM-DD HH:MM，实际：{s}");
+        assert_eq!(&s[4..5], "-");
+        assert_eq!(&s[10..11], " ");
+        assert!(s.starts_with("20"), "年份异常：{s}");
+        // 测试二进制刚编译出来，时间必须落在当下前后
+        let exe = std::env::current_exe().unwrap();
+        let mtime = std::fs::metadata(&exe).unwrap().modified().unwrap();
+        assert!(mtime.duration_since(std::time::UNIX_EPOCH).is_ok(), "mtime 应为 Unix 纪元之后");
     }
 
     /// 数据目录缩写：HOME/APPDATA 前缀换成短标签，不匹配则原样返回

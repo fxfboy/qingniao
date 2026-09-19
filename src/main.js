@@ -1788,16 +1788,18 @@ async function init(){
   updateBotPicker();
   renderStream();
   refresh();
-  // 动态填充关于页版本号与数据目录（数据目录各平台不同，由 Rust 侧按平台缩写）
+  // 动态填充关于页版本号与元信息（数据目录各平台不同；最近更新 = 这份产物的打包时间）
   try {
     const ver = await TAURI.app.getVersion();
     const el = document.getElementById('aboutVersion');
     if(el && ver) el.textContent = 'v' + ver;
   } catch(e) {}
   try {
-    const dir = await invoke('app_data_dir');
-    const el = document.getElementById('aboutDataDir');
-    if(el && dir) el.textContent = dir;
+    const info = await invoke('about_info');
+    const dirEl = document.getElementById('aboutDataDir');
+    if(dirEl && info.data_dir) dirEl.textContent = info.data_dir;
+    const upEl = document.getElementById('aboutUpdated');
+    if(upEl && info.updated_at) upEl.textContent = info.updated_at;
   } catch(e) {}
   log('info', '前端初始化完成 · history=' + config.history.length);
 }
