@@ -31,7 +31,7 @@ impl std::fmt::Display for FeishuError {
 }
 
 impl FeishuError {
-    /// 1061045 内部错误可重试；429 频控可退避重试（§13/§14）
+    /// 1061045 内部错误可重试；429 频控可退避重试；99991400 一并按可重试处理（§13/§14）
     pub fn retryable(&self) -> bool {
         self.code == 1061045 || self.http_status == 429 || self.code == 99991400
     }
@@ -137,7 +137,7 @@ impl FeishuClient {
 
     /// 统一请求入口：JSON 调用返回响应文本；`expect_binary` 时返回字节流。
     /// `multipart_builder` 每次尝试（含重试）重建 Form（Form 不可 clone）。
-    /// 429/1061045/99991400 退避重试（最多 3 次），其余错误立即返回。
+    /// 429/1061045/99991400 退避重试（最多 3 次尝试，即至多 2 次重试，退避 2s / 4s），其余错误立即返回。
     fn call(
         &self,
         kind: &'static str,
@@ -394,7 +394,7 @@ pub fn build_transfer_card(file_name: &str, size: u64, link: &str, ts: i64) -> V
 }
 
 /// Unix 秒 → 本地时区 `YYYY-MM-DD HH:MM`（卡片只展示到分钟）。
-/// 取不到本地偏移时回落 UTC（与 `lib.rs` 的 `now_str` 同口径）。
+/// 取不到本地偏移时回落 UTC（与 `src-tauri/src/lib.rs` 的 `now_str` 同口径）。
 fn fmt_local_time(unix: i64) -> String {
     fmt_local_time_at(unix, time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC))
 }

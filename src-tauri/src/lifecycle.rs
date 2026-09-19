@@ -48,7 +48,7 @@ impl QuitSource {
     }
 }
 
-/// dring 结束后的最终清理（§7.2.2 第 3.4、3.5 步与第 4 步）
+/// drain 结束后的最终清理（§7.2.2 第 3.4、3.5 步与第 4 步）
 pub trait FinalCleanup: Send + Sync + 'static {
     /// 停止 HTTP listener 并释放端口
     fn stop_listener(&self);

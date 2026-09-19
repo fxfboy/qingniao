@@ -3,7 +3,9 @@
 //! 并发模型（方案定案）：std::thread + blocking reqwest；每任务一线程，
 //! 任务内 `Arc<AtomicBool>` CancelToken，在片边界检查取消。
 //! 进度事件 `transfer://progress`，payload：
-//! `{task_id, dir, state, bytes_done, bytes_total, chunk_index, chunk_total, rate_bps, error?, link?, final_path?}`
+//! `{task_id, dir, state, bytes_done, bytes_total, chunk_index, chunk_total, rate_bps, error, link}`
+//! （`error` / `link` 恒发，无值时是 null 而非缺字段；`final_path` **不走本事件**，
+//! 只经 `record_final` 与 `transfer://downloaded` 下发）。
 //! state ∈ running | done | failed | cancelled。
 
 use crate::keyring_store;
@@ -36,7 +38,7 @@ pub const DEFAULT_LOCAL_PORT: u16 = 9876;
 /// CLI 与测试传 [`FixedHost`]（固定值 + 事件丢弃）。
 ///
 /// 这样 core 保持零 tauri 依赖，同时 APP 侧行为不变——原先直接调 `AppHandle` 的
-/// 五处（配置目录 / 下载目录 / 本地服务端口 / 进度事件 / 完成事件）逐一对应到本 trait。
+/// 六处（配置目录 / 下载目录 / 配置端口 / 运行端口 / 进度事件 / 完成事件）逐一对应到本 trait。
 pub trait Host: Send + Sync {
     /// `qingniao.json` 所在目录
     fn config_dir(&self) -> Result<PathBuf, String>;
@@ -158,7 +160,7 @@ impl ChunkStore for FeishuChunks {
 
 /// per-指纹 OS advisory lock：`<work_dir>/<指纹>.lock`。
 /// 锁顺序（§7 实现约束②）：指纹锁 → 状态文件锁，单向；guard 由
-/// `PendingDownload` 携带、`run_download_sync` 取出并持有到下载结束（实现约束①）。
+/// [`TaskHandle::fp_lock`] 携带、`run_download_sync` 取出并持有到下载结束（实现约束①）。
 pub struct FingerprintLock {
     /// 持有即持锁；字段本身无需读取（flock 生命周期绑定 fd）
     #[allow(dead_code)]
@@ -454,7 +456,7 @@ impl Engine {
     }
 
     /// CLI 同步发送（M1）：加密上传 + 发卡片，**当前线程**完成（无后台任务、无进度事件）。
-    /// 返回取回链接与本机接收告警（M0c：本机服务未运行不构成失败）。
+    /// 返回取回链接（M0c：本机服务未运行不构成失败，也不再产生本机接收告警）。
     /// 额度计入与 APP 共享的同一 `quota.json`（同一 work_dir）。
     pub fn send_file_sync(&self, req: &UploadRequest) -> Result<SendOutcome, String> {
         let app_id = self.app_id_of()?;

@@ -228,8 +228,9 @@ const WINDOWS_RESERVED: &[&str] = &[
 ];
 
 /// 落盘前强制净化文件名：
-/// NFC 规范化 → 剥离路径分隔符与 `..` → 过滤控制字符 → 禁止前导 `.` →
-/// Windows 保留名处理 → 长度截断（≤255 字节，按字节）。
+/// NFC 规范化 → 剥离路径分隔符、`..` 与 Windows 非法字符（`: * ? " < > |`）→
+/// 过滤控制字符 → `trim()` → 禁止前导 `.` → Windows 保留名处理 →
+/// 长度截断（≤255 字节，按字节）。
 pub fn sanitize_filename(raw: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     // NFC 规范化（防等价形式绕过）

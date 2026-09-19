@@ -35,9 +35,9 @@ pub const ID_APP_QUIT: &str = "app_quit";
 
 /// 构造 macOS 应用菜单。
 ///
-/// **为什么必须自建**：macOS 的 ⌘Q 走 NSApplication `terminate:`，
-/// **不会**产生 `RunEvent::ExitRequested`（已在 dev 模式下实测确认：按 ⌘Q 后
-/// 日志零新增、进程直接消失）。因此系统预定义的 Quit 会完全绕过 §7.2 的退出协议——
+/// **为什么必须自建**：macOS 的 ⌘Q 默认绑定在系统**预定义** Quit 项上，它走
+/// NSApplication `terminate:`，**不会**产生 `RunEvent::ExitRequested`（已在 dev 模式下
+/// 实测确认：按 ⌘Q 后日志零新增、进程直接消失）。因此预定义 Quit 会完全绕过 §7.2 的退出协议——
 /// 不落 checkpoint、不 drain、不做二次确认。
 ///
 /// 把预定义 Quit 换成我们自己的菜单项后，⌘Q 才会进入 `request_quit`，

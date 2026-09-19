@@ -131,7 +131,11 @@ pub fn missing_source_status(targets: &[SkillTarget]) -> SkillsStatus {
     }
 }
 
-/// 三态判定（paseo 同语义）：任一目标未安装/不一致 → drift；全装且全一致 → up-to-date
+/// 状态判定（paseo 同语义，共四态）：
+/// - `source-missing`：技能源目录不存在（安装包未内置 `skills/`）
+/// - `not-installed`：零个目标已安装
+/// - `drift`：任一目标未安装或内容不一致
+/// - `up-to-date`：全部目标已安装且内容一致
 pub fn get_status(source_dir: &Path, targets: &[SkillTarget]) -> Result<SkillsStatus, String> {
     let bundle = bundle_hashes(source_dir)?;
     let mut tstats = Vec::new();
@@ -314,7 +318,7 @@ pub fn install_cli_binary(source: &Path, target: &Path) -> Result<(), String> {
 
 pub fn cli_target_path(home: &Path) -> PathBuf {
     if cfg!(target_os = "windows") {
-        // Windows 走 %LOCALAPPDATA%qingniao\bin（由调用方传入等效 home 不可行），
+        // Windows 走 %LOCALAPPDATA%\qingniao\bin（由调用方传入等效 home 不可行），
         // 这里以 home 相对约定不便；实际路径由 APP 侧用 LOCALAPPDATA 解析后传 target。
         let _ = home;
         unreachable!("Windows 目标路径由调用方显式传入")
@@ -384,8 +388,7 @@ mod tests {
         uninstall(&targets).unwrap();
         for t in &targets {
             let d = t.dir.join(SKILL_NAME);
-            eprintln!("DBG {} exists={}", d.display(), d.exists());
-
+            assert!(!d.exists(), "卸载后目录应已移除: {}", d.display());
         }
         let st = get_status(&src, &targets).unwrap();
         assert_eq!(st.state, "not-installed");

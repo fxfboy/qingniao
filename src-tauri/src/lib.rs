@@ -106,8 +106,8 @@ fn install_file_logger(app: &tauri::AppHandle) {
 
 /// **仅 debug 构建**：驱动本地服务状态，用于验收 A8（状态刷新）。
 ///
-/// 阶段 A 没有真实 listener，服务状态是静态的；没有这个驱动入口，
-/// 「状态迁移 → 菜单文案更新」这条链路无法在运行中的应用里被观察到。
+/// 该入口用于在运行中的应用里主动造出状态迁移，以便观察
+/// 「状态迁移 → 菜单文案更新」这条链路（真实 listener 的状态由服务自身驱动，不由本入口播种）。
 /// release 构建不含该命令（见 `generate_handler!` 上的 `#[cfg]`）。
 ///
 /// 用法：`invoke('debug_set_service_status', { status: 'running:12345' })`
@@ -595,8 +595,10 @@ fn read_app_config(app: &tauri::AppHandle) -> AppConfig {
 
 /// 服务实际绑定端口（仅 Running 时有值）。
 ///
-/// 注：M0a 期间仍用它生成取回链接（保持行为零变更）；**M0c 将改为 `configured_port`**
-/// 并把本函数降级为「本机作为接收端的可达性」描述（协议 v1.3 D23）。
+/// 注：M0c 起取回链接一律用 `Host::configured_port`（配置值）生成，与本机运行时状态无关
+/// （协议 v1.3 D23）；因此 core 内除测试外**已无该 trait 方法的调用点**。但本函数仍被
+/// `TauriHost::service_bound_port`（`src-tauri/src/transfer/mod.rs`）所调用，**并非死代码**，
+/// 它描述的是「本机作为接收端是否可达」。
 pub fn service_bound_port(app: &tauri::AppHandle) -> Option<u16> {
     let state = app.state::<AppState>();
     let snap = state.service.read().unwrap().status.snapshot();
@@ -755,7 +757,11 @@ fn transfer_service_restart(app: tauri::AppHandle, port: u16) -> Result<serde_js
     })
 }
 
-/// 打开下载目录（filecard「打开目录」/ 托盘菜单共用）
+/// 打开下载目录（filecard「打开目录」入口）
+///
+/// 注意：托盘菜单走的是 `open_downloads_dir_for_tray`，它直接取系统下载目录、
+/// **不读** `transfer.download_dir`；只有本命令经 `TauriHost::resolve_download_dir`
+/// 走「配置优先」。两条路径口径不同（统一属行为变更，另议）。
 #[tauri::command]
 fn open_download_dir(app: tauri::AppHandle) -> Result<(), String> {
     use transfer::engine::Host as _;
@@ -1224,7 +1230,8 @@ fn upload_image(
     Ok(image_key)
 }
 
-/// 测试飞书应用凭证：换取 tenant_access_token → 读取机器人信息 → 探测 im:resource:upload 权限
+/// 测试飞书应用凭证：换取 tenant_access_token → 读取机器人信息 → 依次探测
+/// `im:resource:upload` 与 `drive:drive` 权限（结果汇总进返回值的 `permissions`，共两项）
 #[tauri::command]
 fn test_connection(app: tauri::AppHandle, app_id: String, app_secret: String) -> Result<ConnTestResult, String> {
     let app_id = app_id.trim().to_string();
@@ -1413,7 +1420,7 @@ impl AppState {
     /// 服务状态迁移的**唯一推送点**（§5.2）。
     ///
     /// 先更新权威 provider，再刷新菜单项文字。任何改变服务状态的路径都必须走这里，
-    /// 否则菜单会一直显示陈旧状态——这正是「`refresh_status` 有定义但零调用」的成因。
+    /// 否则菜单会一直显示陈旧状态。
     pub fn set_service_status(&self, status: LocalServiceStatus) {
         self.service.read().unwrap().status.set(status);
         self.sync_tray_status();
@@ -1452,7 +1459,7 @@ pub fn menu_action(app: &tauri::AppHandle, id: &str) {
         tray::ID_OPEN_DOWNLOADS => open_downloads_dir_for_tray(app),
         // 只读 / 未启用项不应产生事件
         tray::ID_SERVICE_STATUS => log::warn!("service_status 为只读项，不应触发事件"),
-        tray::ID_OPEN_SERVICE_SETTINGS => log::warn!("本地服务设置尚未启用（阶段 B）"),
+        tray::ID_OPEN_SERVICE_SETTINGS => log::warn!("该菜单项暂未启用（本地服务配置页已可用）"),
         tray::ID_QUIT => request_quit(app, QuitSource::Menu),
         // macOS 应用菜单的 Quit（⌘Q）：与托盘 Quit 同语义（§7.1），只是来源不同
         tray::ID_APP_QUIT => request_quit(app, QuitSource::Shortcut),
@@ -1486,7 +1493,7 @@ fn open_downloads_dir_for_tray(app: &tauri::AppHandle) {
     }
 }
 
-/// **仅 debug 构建**：从环境变量播种状态，便于验收需要「启动即处于某状态」的用例。
+/// **仅 debug 构建**：状态播种占位——`QINGNIAO_DEBUG_TRANSFER` 已被忽略，传输快照由真实引擎提供。
 ///
 /// 阶段 B 起传输快照来自真实引擎（`EngineTransferAdapter`），播种 TransferSnapshot
 /// 的旧路径已移除；真实传输任务可直接通过前端或 `QINGNIAO_DEBUG_TRANSFER=1` 时
@@ -1788,7 +1795,7 @@ pub fn run() {
                 .unwrap()
                 .replace(std::sync::Arc::new(handles));
 
-            // 仅 debug：按环境变量播种状态（验收 A12 用）
+            // 仅 debug：状态播种占位（QINGNIAO_DEBUG_TRANSFER 已忽略，快照由真实引擎提供）
             #[cfg(debug_assertions)]
             seed_debug_state_from_env(app.handle());
             Ok(())
@@ -1825,8 +1832,8 @@ pub fn run() {
         // §7.2.1：仅 Exiting 放行，其余状态一律拦截。
         // AppHandle::exit() 自身会再次触发本事件，缺少放行分支将永远无法退出。
         //
-        // 注意 macOS 的 ⌘Q / 应用菜单 Quit 走的也是这条事件——
-        // 必须在 Running 时把它导入统一退出协议，否则会被自家的 prevent_exit()
+        // 注意 macOS 的 ⌘Q 绑定在自建 Quit 项（`ID_APP_QUIT`）上，该菜单项走的正是
+        // 这条事件——必须在 Running 时把它导入统一退出协议，否则会被自家的 prevent_exit()
         // 死死挡住，应用变得无法退出（§7.1 要求 ⌘Q 与菜单退出同语义）。
         tauri::RunEvent::ExitRequested { api, code, .. } => {
             let state = app_handle.state::<AppState>();

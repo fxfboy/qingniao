@@ -1,8 +1,12 @@
 //! 青鸟 CLI（bin: qingniao-cli，安装时复制为 qingniao）。方案 v3 §六。
 //!
 //! 契约：
-//! - `--json` 时 stdout 只输出一个机器可读 JSON 对象，诊断信息全部走 stderr
-//! - 退出码：0 成功（含 dry-run）；1 用法/配置错误；2 发送失败（细分在 error.kind）
+//! - `--json` 时成功路径在 stdout 输出单个机器可读 JSON 对象，诊断信息全部走 stderr。
+//!   注意：**Err 路径（用法/配置/锁定/网络等失败）stdout 为空**，错误以 stderr 文本与
+//!   退出码表达；stdout 仍产 JSON 的失败路径只有两条——`send` 的「HTTP 完成但业务失败」
+//!   信封（其中 `error.kind` 恒为 `"feishu"`）与 `doctor --json` 的检查报告。
+//! - 退出码：0 成功（含 dry-run）；1 用法/配置错误；2 发送失败或锁占用（busy）。
+//!   类别细分看 stderr 上的错误标签，而**不是** JSON 的 `error.kind`。
 //! - secret 只从 stdin / 环境变量读（D11）；URL 默认白名单，`--allow-insecure-url` 放开（D10）
 //!
 //! 命令逻辑放在 lib（`cmd_*` 函数，显式传 `config_path`）以便集成测试直接驱动。
@@ -256,7 +260,7 @@ pub struct SendArgs {
     /// 只组装 payload 预览，不发送、不写历史
     #[arg(long)]
     pub dry_run: bool,
-    /// dry-run 时输出真实 timestamp+sign（默认 "omitted"，避免认证材料进 stdout）
+    /// dry-run 时输出真实 sign（默认 "omitted"，避免认证材料进 stdout）；timestamp 不在输出中
     #[arg(long)]
     pub show_sign: bool,
     /// 放开 URL 白名单（内网 mock / 自建网关）

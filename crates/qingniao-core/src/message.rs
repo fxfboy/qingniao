@@ -12,8 +12,9 @@ fn re(pattern: &'static str) -> Regex {
     Regex::new(pattern).expect("内置正则必须可编译")
 }
 
-// JS 源：src/message.js detect() 中的四个正则与 parseInline 的前缀正则。
-// JS 的 ^ 在非 multiline 下为串首、search 为最左匹配，与 regex crate 默认语义一致。
+// JS 源：src/message.js detect() 中的三个正则（hasMd / hasAt / 卡片）与 parseInline 的前缀正则。
+// JS 的 hasMd 正则带 `m` 标记（`^` / `$` 按行匹配）、search 取最左匹配；故此处用 `(?m)`
+// 保持等价——regex crate 默认不带该语义。
 fn md_detect_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {

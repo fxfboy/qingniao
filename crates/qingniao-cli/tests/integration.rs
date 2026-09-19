@@ -308,7 +308,7 @@ fn legacy_dir_migration_copies_config() {
 }
 
 #[test]
-fn timeout_maps_to_unknown_state() {
+fn network_failure_maps_to_failed_state() {
     // 指向一个不监听的非路由地址会立即连接失败（failed），真正的超时难以在测试中稳定构造；
     // 此处验证网络层失败 → failed、退出码 2 的映射；unknown 分支由 dispatch_send 的
     // is_timeout 判定覆盖（send_webhook 单元级）

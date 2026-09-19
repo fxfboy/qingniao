@@ -1633,7 +1633,7 @@ async function refreshServiceStatus(){
     else if (st.status === 'Starting') setPortNow('', '启动中', '…');
     else setPortNow('err', '未运行', '本地服务未启动');
   }catch(e){
-    setPortNow('err', '未运行', '传输服务尚未接入（P3）');
+    setPortNow('err', '未运行', '无法获取服务状态');
   }
 }
 $('#portRestart').addEventListener('click', async () => {
@@ -1687,7 +1687,7 @@ async function refreshKeyCard(){
     $('[data-key="rotate"]').hidden = !has;
     $('#keyGenerateBtn').textContent = has ? '重新生成' : '生成密钥';
   }catch(e){
-    $('#keyStoreHint').textContent = '密钥服务尚未接入（P1）';
+    $('#keyStoreHint').textContent = '无法获取密钥状态';
   }
 }
 const keyCard = $('#keyCard');

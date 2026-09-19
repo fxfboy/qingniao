@@ -2,10 +2,11 @@
 //!
 //! wire contract（§10.1）：
 //! - 仅监听 `127.0.0.1:<bound_port>`；Host 校验防 DNS rebinding
-//! - GET  /dl?t=…       无副作用，校验通过 → 渲染确认页（一次性 handle，活到链接新鲜度窗口结束）
+//! - GET  /dl?t=…       不产生云端/网络副作用；校验通过 → 建立内存会话并渲染确认页
+//!                      （一次性 handle，活到链接新鲜度窗口结束）
 //! - POST /dl/confirm   Origin/Referer 校验（缺/跨 → 403）→ Content-Type → handle 单消费
 //! - 错误统一 JSON `{"code":..,"msg":..}`；Cache-Control: no-store
-//! - 并发连接 ≤ 4（4 个 worker 线程共同 recv）；读超时 10 s、写超时 30 s
+//! - 并发连接 ≤ 4（4 个 worker 线程共同 recv）；tiny_http 无 per-request 超时，靠请求体上限保护
 //! - 退出门闩（对齐 dock-tray A19）：stop_accepting 后新请求一律 503
 
 use crate::service::{LocalServiceController, LocalServiceStatus, ServiceStatusProvider, StatusCell};
@@ -164,7 +165,8 @@ impl LocalServiceController for RealLocalService {
         let _ = port;
         self.cell.set(LocalServiceStatus::Stopped);
     }
-    /// 端口变更（§10.2）：统一走 [`restart_service`]（需要页面资源）
+    /// 端口变更（§10.2）：本实现为空占位——HTTP 层拿不到页面资源，真实入口是
+    /// [`restart_service`]（由 `lib.rs` 装配后调用）
     fn restart(&self, _port: u16) {}
 }
 
@@ -265,7 +267,7 @@ fn handle_get_dl(ctx: &Ctx, request: tiny_http::Request, url: &str) {
             // 创建一次性会话（handle = CSPRNG 128-bit hex，活到链接新鲜度窗口结束）
             match ctx.engine.create_session(&payload, ev) {
                 Ok(sess) => {
-                    // 倒计时 = 链接剩余有效期（payload.ts + 30 min），与群消息/历史文案同源
+                    // 倒计时 = 链接剩余有效期（payload.ts + 新鲜度窗口），与群消息/历史文案同源
                     let ttl = (sess.expires_at - qingniao_core::transfer::crypto::now_unix()).max(0);
                     state = "pending".into();
                     set_var(&mut vars, "{{NAME}}", html_escape(&sess.name));
@@ -427,7 +429,7 @@ fn urldecode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'%' if i + 2 < bytes.len() + 1 && i + 2 < bytes.len() + 1 => {
+            b'%' if i + 2 < bytes.len() => {
                 if i + 2 < bytes.len() {
                     let hi = (bytes[i + 1] as char).to_digit(16);
                     let lo = (bytes[i + 2] as char).to_digit(16);

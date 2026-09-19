@@ -2,7 +2,7 @@
 name = "qingniao"
 version = "0.6.2"
 description = "青鸟 · 飞书消息助手 — 向飞书自定义机器人发送各种格式消息"
-authors = ["fuxinf"]
+authors = ["fxfboy"]
 edition = "2021"
 
 [lib]

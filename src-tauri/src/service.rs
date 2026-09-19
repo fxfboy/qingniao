@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// 本地服务默认端口。
+/// 本地服务默认端口（自 M0c 起真源在 core：链接端口口径 `configured_port` 的缺省值）。
 ///
-/// **仅**作为 `configured_port` 的默认值来源；菜单文案禁止硬编码该字面量（§9.2）。
-// 自 M0c 起真源在 core（链接端口口径 configured_port 的缺省值），此处仅转发既有引用
+/// 此处仅转发既有引用。除作为 `configured_port` 的缺省值外，本 crate 的 debug 解析兜底
+/// 与测试用 fake 端口也取自它。菜单文案禁止硬编码该字面量（§9.2）。
 pub use qingniao_core::transfer::engine::DEFAULT_LOCAL_PORT;
 
 /// 服务启动失败原因（§9.2）

@@ -1,10 +1,12 @@
 //! 发送与图片上传（方案 v3 §三/§六，D7/D8）。
 //!
 //! 契约要点：
-//! - core 返回类型化 `SendResult`，APP 与 CLI 都以 `feishu_code == 0` 且 HTTP 2xx 判定成功
-//!   （修复现状「4xx/5xx 也返回 Ok 字符串」，review P1-3）
-//! - history 只由 [`record_send`] 单一入口写入（D7）；重试由 Agent 显式发起，无自动重试
-//! - 历史条目与 APP 前端 `rec` 形状兼容：`{time, kind, dir, summary, ok, status, payload, [text, bot]}`
+//! - core 返回类型化 `SendResult`，APP 与 CLI 都以「HTTP 2xx 且（响应无 code 字段 或
+//!   feishu_code == 0）」判定成功（修复现状「4xx/5xx 也返回 Ok 字符串」，review P1-3）
+//! - history 由 core 写入：单条发送走 [`record_send`]（D7），APP 侧文件类条目走
+//!   `config::append_history_item`（第二个公开写入口）；重试由 Agent 显式发起，无自动重试
+//! - 历史条目与 APP 前端 `rec` 形状兼容：`{time, kind, dir, summary, ok, status, state, payload, bot}`
+//!   （`state` / `bot` 恒存在；`text` 不在此产出，由 CLI / APP 侧按需补写）
 //!   其中 `status` 沿用 APP 的展示文案（如 "200 OK" / "19021 xxx"）；三态判定写入
 //!   `state` 字段：`sent` / `failed` / `unknown`（超时=消息可能已送达，不可假去重）
 
@@ -19,7 +21,10 @@ pub const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 pub const UPLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const BODY_SUMMARY_MAX: usize = 512;
 
-/// 错误类别（`--json` 的 `error.kind`；退出码映射见方案 §六：usage/config→1，其余→2）
+/// 错误类别。**双重身份**：既是 stderr 上的标签名（CLI `kind_name`），也是 CLI 内部的分类维度。
+/// 注意：这些 kind 基本不会出现在 `--json` 的 `error.kind` 中——写入 JSON 信封的 `error.kind`
+/// 目前恒为 `"feishu"`（仅 `send` 的「HTTP 完成但业务失败」一条路径会产出该信封）。
+/// 退出码映射见方案 §六：usage/config → 1，其余（含 busy）→ 2。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SendErrorKind {
@@ -277,7 +282,7 @@ pub fn dispatch_send(
 }
 
 fn payload_summary(payload: &Value) -> String {
-    // 与 APP makePreview 同规则：首行前 60 字符；image 类型由调用方覆盖为文件名列表
+    // 首行前 60 字符；image 类型由调用方覆盖为文件名列表（APP 侧 `src/main.js:414`）
     let msg_type = payload.get("msg_type").and_then(|v| v.as_str()).unwrap_or("");
     let first_line = match payload.pointer("/content/text") {
         Some(Value::String(s)) => s.lines().next().unwrap_or("").to_string(),

@@ -134,7 +134,7 @@ pub struct Config {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BotView {
     pub index: usize,
-    /// schema v2 起存在；旧配置缺失时由 `ensure_bot_ids` 在写路径补齐
+    /// schema v2 起存在；旧配置缺失时由 `ensure_bot_ids` 在 `add_bot` / `remove_bot` 写路径补齐
     pub id: Option<String>,
     pub name: String,
     pub url: String,
@@ -165,7 +165,7 @@ impl BotView {
 }
 
 pub fn mask_webhook_url(url: &str) -> String {
-    // https://open.feishu.cn/open-apis/bot/v2/hook/xxxx-xxxx → .../hook/****（保留前 4 位）
+    // https://open.feishu.cn/open-apis/bot/v2/hook/xxxx-xxxx → .../hook/xxxx****（保留前 4 位）
     match url.find("hook/") {
         Some(i) => {
             let rest = &url[i + 5..];
@@ -263,7 +263,8 @@ impl Config {
         self.webhooks().into_iter().find(|b| b.matches_key(key))
     }
 
-    /// 写路径调用：为缺失 id 的机器人补齐稳定 id（旧配置按 bot{index+1}，新增用随机 b-xxxx）
+    /// 写路径调用：为缺失 id 的机器人补齐稳定 id（本函数只按 `bot{index+1}` 补旧配置缺失的 id；
+    /// `add_bot` 新增的随机 `b-xxxx` 不经此函数）
     pub fn ensure_bot_ids(&mut self) {
         let Some(arr) = self.raw.get_mut("webhooks").and_then(|v| v.as_array_mut()) else {
             return;
@@ -333,7 +334,8 @@ impl Config {
         Ok(target.clone())
     }
 
-    /// 追加发送历史（D7：history 只由 core 的 record_send 写入；上限 100 条与 APP 一致）
+    /// 追加发送历史（D7：history 由 core 写入——单条发送走 `record_send`，本方法供 APP 的
+    /// 文件类条目；上限 100 条与 APP 一致）
     pub fn push_history(&mut self, rec: Value) {
         let arr = self
             .raw
@@ -413,7 +415,9 @@ pub fn replace_preserving_history(config_path: &Path, new_value: Value) -> Resul
 }
 
 /// R8（M0b）：锁内按 `time`+`kind` 定位并删除历史条目，返回删除条数。
-/// 历史条目无 id（§11 R8 合并语义栏），time 为 ISO8601（毫秒级）+ kind 组合在单机内唯一。
+/// 历史条目无 id（§11 R8 合并语义栏），以 `time` + `kind` 组合定位。注意 `time` 由
+/// `iso8601_now` 产出，精度止于秒（毫秒位恒为 `.000Z`），因此同一秒内的同 kind 条目
+/// **不唯一**——此情形下本函数会把它们一并删除。
 pub fn delete_history_entry(config_path: &Path, time: &str, kind: &str) -> Result<usize, String> {
     modify(config_path, |cfg| {
         let arr = cfg

@@ -53,7 +53,8 @@ pub fn set_current(hex_key: &str) -> Result<(), String> {
     set(ACCOUNT_CURRENT, hex_key)
 }
 
-/// 读取旧密钥（若存在且未过 30 天保留期）；过期则顺手清理并返回 None
+/// 读取旧密钥（`previous-at` 距现在未超 30 天保留期）；过期则顺手清理并返回 None。
+/// 若 `previous-at` 缺失或为 0（如轮换中途失败），视为**未过期**，TTL 不生效。
 pub fn get_previous() -> Result<Option<String>, String> {
     let prev = match get(ACCOUNT_PREVIOUS)? {
         Some(v) => v,
@@ -92,7 +93,7 @@ pub fn generate() -> String {
     crypto::hex(&crypto::random_bytes(32))
 }
 
-/// 清除本机全部传输密钥（导入覆盖不需要显式清除，此处供「重新生成」等场景用）
+/// 清除**旧**传输密钥（不动当前主密钥；导入覆盖不需要显式清除，此处供轮换后手动收尾用）
 pub fn clear_previous() -> Result<(), String> {
     delete(ACCOUNT_PREVIOUS)?;
     delete(ACCOUNT_PREVIOUS_AT)
