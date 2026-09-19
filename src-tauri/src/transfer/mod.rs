@@ -10,7 +10,7 @@
 //! `local_server.rs` **不在此列**：它本身零 tauri 依赖，留在 `src-tauri` 只是因为
 //! 它服务于浏览器确认页（APP 独有），且引擎去 tauri 化后它只需 `use` core 的 `Engine`。
 
-pub use qingniao_core::transfer::{crypto, engine, feishu, quota};
+pub use qingniao_core::transfer::{cleanup, crypto, engine, feishu, quota};
 
 use engine::Host;
 use std::path::PathBuf;

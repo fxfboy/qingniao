@@ -374,3 +374,25 @@ fn detect_via_type_flag() {
     assert_eq!(body["msg_type"], "text");
     assert_eq!(body["content"]["text"], "**not bold**");
 }
+
+// ===== 云端清理接线（清理方案 v0.3 §5.4 / M2）=====
+
+/// 真实二进制进程：stderr logger 已在 main 入口安装，日志一律走 stderr，
+/// `--json` 的 stdout 仍必须是单个可解析 JSON（不被 log 行污染）。
+#[test]
+fn binary_json_stdout_is_not_polluted_by_log_channel() {
+    let dir = temp_dir("cleanup-logger");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_qingniao-cli"))
+        .arg("doctor")
+        .arg("--json")
+        .env("QINGNIAO_CONFIG_DIR", &dir)
+        .env("QINGNIAO_LOG", "info")
+        .output()
+        .expect("启动 CLI 二进制");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: Value = serde_json::from_str(stdout.trim())
+        .expect("stdout 必须是单个 JSON（log 输出不得进 stdout）");
+    assert!(v["checks"].as_array().map(|a| !a.is_empty()).unwrap_or(false));
+    // doctor 的结论随环境（网络/机器人配置）变化，只断言 stdout 纯净 + 结构合法
+    let _ = v["ok"];
+}

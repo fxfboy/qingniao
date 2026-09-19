@@ -1722,7 +1722,7 @@ pub fn run() {
                 .map_err(|e| format!("无法定位配置目录: {e}"))?
                 .join("transfer");
             let engine = transfer::engine::Engine::open(
-                work_dir,
+                work_dir.clone(),
                 transfer::TauriHost::into_arc(app.handle().clone()),
             )
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
@@ -1754,6 +1754,30 @@ pub fn run() {
             {
                 let cfg = read_app_config(app.handle());
                 engine.retry_pending_deletes(&cfg.app_id, &cfg.app_secret);
+            }
+
+            // 6. 云端清理 ticker（清理方案 v0.3 §5.3 / D27）：60 s tick，**线程首 tick 立即跑一次**
+            //    （不在 setup 里同步做网络：离线时会阻塞启动，P2-1）。每次 tick 调 run_due_feishu，
+            //    到期门控下常态是「读一个小 JSON、无网络请求」。复用 engine.quota（§5.2）；
+            //    不入退出协议（cleanup.json 已持久化，下次启动/下条 CLI 命令续跑）。
+            {
+                let engine = engine.clone();
+                let work_dir = work_dir.clone();
+                let app_handle = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("qn-cleanup".into())
+                    .spawn(move || loop {
+                        let cfg = read_app_config(&app_handle);
+                        transfer::cleanup::run_due_feishu(
+                            &work_dir,
+                            &cfg.app_id,
+                            &cfg.app_secret,
+                            engine.quota.clone(),
+                            transfer::crypto::now_unix(),
+                        );
+                        std::thread::sleep(std::time::Duration::from_secs(60));
+                    })
+                    .ok();
             }
 
             // §8.1：仅在主实例、且 single-instance 判定之后构造**唯一**的 tray

@@ -3066,6 +3066,7 @@ name = "qingniao-cli"
 version = "0.6.1"
 dependencies = [
  "clap",
+ "log",
  "qingniao-core",
  "serde",
  "serde_json",

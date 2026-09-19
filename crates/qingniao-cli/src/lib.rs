@@ -88,6 +88,57 @@ fn warn_stderr(msg: &str) {
     eprintln!("[青鸟] 警告: {msg}");
 }
 
+/// 触发一轮云端清理（清理方案 v0.3 §5.3 / D27：CLI 每次 transfer send / recv
+/// 命令开始时一次，让「只装 CLI 不常开 APP」的用户也有清理路径）。
+/// best-effort：run_due_feishu 内部对一切失败只记日志（log 通道 → stderr），
+/// 绝不影响命令退出码与 `--json` stdout。
+fn run_transfer_cleanup(engine: &Engine, app_id: &str, app_secret: &str) {
+    qingniao_core::transfer::cleanup::run_due_feishu(
+        engine.work_dir(),
+        app_id,
+        app_secret,
+        engine.quota.clone(),
+        qingniao_core::transfer::crypto::now_unix(),
+    );
+}
+
+// ===== 最小 stderr logger（清理方案 v0.3 §5.4）=====
+
+/// 日志级别：默认 warn（+error），`QINGNIAO_LOG=info` 提级
+/// （环境变量命名对齐 QINGNIAO_CONFIG_DIR / QINGNIAO_BOT_SECRET）。
+fn level_from_env_value(v: Option<&str>) -> log::LevelFilter {
+    match v {
+        Some("info") => log::LevelFilter::Info,
+        _ => log::LevelFilter::Warn,
+    }
+}
+
+/// 手写最小 logger（约 15 行，不引入 env_logger）：一律写 stderr，
+/// `--json` 的 stdout 契约不受影响。汇总行走 log::info!（默认不可见），
+/// 每条具体失败走 log::warn!（默认可见）。
+struct StderrLogger(log::LevelFilter);
+
+impl log::Log for StderrLogger {
+    fn enabled(&self, meta: &log::Metadata) -> bool {
+        meta.level() <= self.0
+    }
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[青鸟] {} {}", record.level(), record.args());
+        }
+    }
+    fn flush(&self) {}
+}
+
+/// 在 CLI main 入口**一次性**安装（不装在 transfer 子命令内——core 其他路径的
+/// log::warn!，如「quota.json 落盘失败」，也应被看见）。不装则 core 的日志被静默丢弃。
+pub fn install_stderr_logger() {
+    let level = level_from_env_value(std::env::var("QINGNIAO_LOG").ok().as_deref());
+    if log::set_boxed_logger(Box::new(StderrLogger(level))).is_ok() {
+        log::set_max_level(level);
+    }
+}
+
 fn print_warnings(warnings: &[String]) {
     for w in warnings {
         warn_stderr(w);
@@ -624,6 +675,9 @@ pub fn cmd_transfer_send(
     let engine =
         Engine::open(config_dir.join("transfer"), host).map_err(CliFail::config)?;
 
+    // 云端清理触发（D27）：best-effort，失败只记日志，不影响本命令
+    run_transfer_cleanup(&engine, &app_id, &app_secret);
+
     let name = file
         .file_name()
         .and_then(|n| n.to_str())
@@ -761,6 +815,9 @@ pub fn cmd_transfer_recv(
             ),
     );
     let engine = Engine::open(config_dir.join("transfer"), host).map_err(CliFail::config)?;
+
+    // 云端清理触发（D27）：best-effort，失败只记日志，不影响本命令
+    run_transfer_cleanup(&engine, &app_id, &app_secret);
 
     // C5 约束 a：与 /dl 完全同一路径
     let ev = engine.evaluate_payload(&link).map_err(|m| CliFail {
@@ -1138,5 +1195,20 @@ fn app_running() -> bool {
     #[cfg(not(target_os = "macos"))]
     {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 清理方案 v0.3 §5.4：默认 warn，QINGNIAO_LOG=info 提级
+    #[test]
+    fn stderr_logger_level_follows_env() {
+        assert_eq!(level_from_env_value(None), log::LevelFilter::Warn);
+        assert_eq!(level_from_env_value(Some("")), log::LevelFilter::Warn);
+        assert_eq!(level_from_env_value(Some("warn")), log::LevelFilter::Warn);
+        assert_eq!(level_from_env_value(Some("debug")), log::LevelFilter::Warn);
+        assert_eq!(level_from_env_value(Some("info")), log::LevelFilter::Info);
     }
 }
