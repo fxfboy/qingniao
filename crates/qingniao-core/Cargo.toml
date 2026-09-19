@@ -2,7 +2,7 @@
 name = "qingniao-core"
 version = "0.5.0"
 edition = "2021"
-description = "青鸟共享核心：消息类型识别 / Markdown→post / 卡片解析 / payload 组装 / webhook 签名（APP 与 CLI 共用，零 tauri 依赖）"
+description = "青鸟共享核心：消息组装/识别/签名/配置 + 跨网传输（APP 与 CLI 共用，零 tauri 依赖）"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -15,3 +15,16 @@ sha2 = "0.10"
 base64 = "0.22"
 # webhook 发送 / 图片上传（blocking，与 APP 同依赖不重复编译）
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "multipart"] }
+
+# ===== 传输模块（方案 v4 §4 C1：并入 core 而非新建 crate）=====
+# payload 信封与分片 AEAD（AES-256-GCM）
+aes-gcm = "0.10"
+# K/DEK/nonce/handle 的 CSPRNG
+rand = "0.8"
+# 卡片/日志的本地时间渲染
+time = { version = "0.3", features = ["formatting", "local-offset"] }
+# 文件名 Unicode NFC 规范化（P2-3）
+unicode-normalization = "0.1"
+# K / app_secret 存 OS 凭据库（macOS Keychain / Windows Credential Manager，D15/D21）
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+log = { version = "0.4", features = ["std", "alloc"] }
