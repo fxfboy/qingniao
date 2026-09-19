@@ -602,6 +602,11 @@ fn transfer_parse_payload(app: tauri::AppHandle, input: String) -> Result<serde_
         "size": sess.size,
         // 回传指纹：前端据此与 transfer://downloaded 事件去重（同一文件不会落两条记录）
         "fingerprint": fingerprint,
+        // 取回页展示所需：发送时间 / 剩余有效期倒计时 / 保存目录
+        // （与会话同源，保证应用内取回页与 /dl 确认页显示的时长一致）
+        "created_at": sess.created_at,
+        "expires_at": sess.expires_at,
+        "download_dir": sess.download_dir,
     }))
 }
 

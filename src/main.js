@@ -861,6 +861,8 @@ function applyProgress(p){
     saveConfig(); renderStream();
     if (p.state === 'failed') toast('传输失败', rec.error, 'err');
   }
+  // 取回弹窗开出去的那次下载收尾了 → 地址栏重新可用（一次只跑一个取回）
+  if (p.state !== 'running' && rvLockedRec === rec){ rvLockedRec = null; rvLock(false); }
 }
 listenEvent('transfer://progress', ev => applyProgress(ev.payload || {}));
 /* 浏览器取回（点聊天里的链接）完成 → 补写历史记录；应用内取回已有记录，去重跳过 */
@@ -885,77 +887,166 @@ async function pollFinalState(taskId){
   }catch(e){}
 }
 
-/* ===================== 取回链接 ===================== */
-const retrieveBtn = $('#retrieveBtn'), retrievePop = $('#retrievePop');
-retrieveBtn.addEventListener('click', e => {
-  e.stopPropagation();
-  const show = !retrievePop.classList.contains('show');
-  retrievePop.classList.toggle('show', show);
-  retrieveBtn.setAttribute('aria-expanded', String(show));
-  if (show) $('#retrieveInput').focus();
+/* ===================== 取回文件：浏览器式弹窗 =====================
+   视口里渲染的取回页与 assets/transfer-confirm.html 同一套排版；
+   下载只跑一次：聊天记录是任务的宿主，取回页只是它的显示器。 */
+const retrieveBtn = $('#retrieveBtn'), rvOverlay = $('#retrieveOverlay');
+const rvInput = $('#rvInput'), rvViewport = $('#rvViewport');
+const rvScreens = $$('.rv-screen', rvOverlay), rvStages = $$('.rv-stage', rvOverlay);
+let rvSession = null;        // transfer_parse_payload 返回的会话信息
+let rvTtlTimer = null, rvTtlLeft = 0;
+let rvLockedRec = null;      // 下载期间锁住地址栏的那条记录
+
+function rvScreen(name){
+  rvScreens.forEach(s => s.classList.toggle('on', s.dataset.screen === name));
+}
+function rvStage(name){
+  rvStages.forEach(s => s.classList.toggle('on', s.dataset.stage === name));
+  rvViewport.scrollTop = 0;
+}
+function rvLock(on){
+  rvInput.disabled = on;
+  $('#rvGo').disabled = on;
+}
+/* 地址栏展示用：本机服务的实际绑定端口（读不到就退回配置端口） */
+function rvHost(){
+  const m = /^127\.0\.0\.1:(\d+)$/.exec(($('#portBound').textContent || '').trim());
+  const port = m ? m[1] : ((config.transfer && config.transfer.configured_port) || 9876);
+  return '127.0.0.1:' + port;
+}
+function rvSentLabel(unix){
+  const d = new Date((Number(unix) || 0) * 1000);
+  if (isNaN(d.getTime()) || !unix) return '';
+  const day = d.toDateString() === new Date().toDateString()
+    ? '今天' : (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  return day + ' ' + fmtClock(d);
+}
+function rvPaintTtl(){
+  const m = Math.floor(rvTtlLeft / 60), s = rvTtlLeft % 60;
+  $('#rvTtl').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+}
+function rvRunTtl(){
+  clearInterval(rvTtlTimer);
+  rvPaintTtl();
+  rvTtlTimer = setInterval(() => {
+    rvTtlLeft--;
+    rvPaintTtl();
+    if (rvTtlLeft <= 0){
+      clearInterval(rvTtlTimer);
+      rvFail('链接已经过期', '这条链接超出了 10 分钟的新鲜度窗口。请让对方在青鸟里重新发一次这个文件。');
+    }
+  }, 1000);
+}
+/* 打不开就给一张错误页（像浏览器），而不是弹一条提示 */
+const RV_SHAPE_HINT = '请把群里那条取回链接整条粘进来，或只粘 t= 后面那段取回码。';
+function rvFail(title, msg){
+  clearInterval(rvTtlTimer);
+  $('#rvErrTitle').textContent = title;
+  $('#rvErrMsg').textContent = msg;
+  rvScreen('error');
+  rvInput.focus();
+  rvInput.select();
+}
+function openRetrieve(){
+  rvOverlay.classList.add('show');
+  rvInput.focus();
+  if (rvInput.value) rvInput.select();
+}
+function closeRetrieve(){
+  rvOverlay.classList.remove('show');
+  retrieveBtn.focus();
+}
+async function rvOpen(){
+  const v = (rvInput.value || '').trim();
+  if (!v){ rvFail('地址栏是空的', RV_SHAPE_HINT); return; }
+  if (!invoke){ rvFail('取回需要青鸟桌面端', '当前环境无法访问本机传输服务。'); return; }
+  const go = $('#rvGo');
+  if (go.disabled) return;
+  go.disabled = true;
+  try{
+    // 形态校验交给后端（唯一权威）：链接被飞书包装、百分号编码或整条粘贴时也能认出来
+    const meta = await invoke('transfer_parse_payload', {input: v});
+    const ttl = Math.round((meta.expires_at || 0) - Date.now() / 1000);
+    if (ttl <= 0){ rvFail('链接已经过期', '这条链接超出了 10 分钟的新鲜度窗口。请让对方在青鸟里重新发一次这个文件。'); return; }
+    rvSession = meta;
+    /* 粘的是裸取回码时把地址栏补成完整链接（纯展示，不影响已发给后端的输入） */
+    if (!/^https?:\/\//i.test(v) && /^[A-Za-z0-9_-]{24,}$/.test(v)) rvInput.value = 'http://' + rvHost() + '/dl?t=' + v;
+    const name = meta.name || '未命名文件';
+    $('#rvFileName').textContent = name;
+    $('#rvFileName').title = name;
+    $('#rvFileSize').textContent = fmtSize(meta.size || 0);
+    const ext = /\.([A-Za-z0-9]{1,8})$/.exec(name);
+    $('#rvFileExt').textContent = ext ? ext[1].toUpperCase() : '';
+    $('#rvSentTime').textContent = rvSentLabel(meta.created_at);
+    const dir = meta.download_dir || '';
+    $('#rvSaveDir').textContent = dir || '系统下载目录';
+    $('#rvSaveDir').title = dir;
+    const path = (dir ? dir.replace(/\/+$/, '') + '/' : '') + name;
+    $('#rvPath').textContent = path;
+    $('#rvPath').title = path;
+    rvTtlLeft = ttl;
+    rvScreen('page');
+    rvStage('pending');
+    rvRunTtl();
+    $('#rvStart').focus();
+  }catch(e){
+    rvFail(String(e && e.message || e).slice(0, 160), RV_SHAPE_HINT);
+  }finally{
+    go.disabled = false;
+  }
+}
+/* 开始下载：取回页不留进度，任务落到消息记录里 */
+$('#rvStart').addEventListener('click', async () => {
+  const s = rvSession;
+  if (!s || !invoke) return;
+  clearInterval(rvTtlTimer);
+  rvLock(true);
+  const rec = {
+    time: nowIso(), kind: 'file', dir: 'in',
+    name: s.name || '', size: s.size || 0,
+    state: 'downloading', bytes_done: 0,
+    fingerprint: s.fingerprint || ''
+  };
+  const art = addRecord(rec);
+  const card = $('.filecard', art);
+  rvLockedRec = rec;
+  rvStage('started');
+  closeRetrieve();
+  toast('已开始下载', '进度在消息记录里');
+  try{
+    const res = await invoke('transfer_confirm_download', {sessionId: s.session_id});
+    if (res.already_done){
+      // 幂等：该文件已取回过（§9.4 已消费缓存）
+      rec.state = 'downloaded';
+      rec.final_path = res.final_path || '';
+      rec.bytes_done = rec.size;
+      rvLockedRec = null; rvLock(false);
+      saveConfig(); renderStream();
+      toast('该文件已取回过', '不会重复下载');
+      return;
+    }
+    rec.task_id = res.task_id;
+    liveTasks.set(res.task_id, {record: rec, el: card});
+    saveConfig();
+    // 补偿：终态事件可能早于本次注册已发出
+    setTimeout(() => pollFinalState(res.task_id), 300);
+  }catch(e){
+    const msg = String(e && e.message || e).slice(0, 120);
+    rec.state = 'failed'; rec.error = msg;
+    rvLockedRec = null; rvLock(false);
+    saveConfig(); renderStream();
+    toast('无法开始下载', msg, 'err');
+  }
 });
-retrievePop.addEventListener('click', e => e.stopPropagation());
+retrieveBtn.addEventListener('click', openRetrieve);
+$('#rvGo').addEventListener('click', rvOpen);
+rvInput.addEventListener('keydown', e => { if (e.key === 'Enter') rvOpen(); });
+$('#rvClose').addEventListener('click', closeRetrieve);
+$('#rvCloseBtn').addEventListener('click', closeRetrieve);
 document.addEventListener('click', () => {
-  retrievePop.classList.remove('show');
-  retrieveBtn.setAttribute('aria-expanded', 'false');
   closeAddMenu();
   toggleBotMenu(false);
 });
-function parseRetrieve(){
-  const v = ($('#retrieveInput').value || '').trim();
-  const hint = $('#retrieveHint');
-  hint.classList.remove('bad');
-  if (!v){
-    hint.classList.add('bad');
-    hint.textContent = '请先粘贴群里的取回链接，或链接 t= 后面那段载荷。';
-    return;
-  }
-  if (!invoke){ hint.classList.add('bad'); hint.textContent = 'Tauri 环境不可用。'; return; }
-  // 形态校验交给后端（唯一权威）：前端只认「http://127.0.0.1:<port>/dl?t=…」会在
-  // 链接被飞书包装/百分号编码、或粘贴整条消息时静默拦掉合法输入（§9.2 兜底入口）
-  const go = $('#retrieveGo');
-  if (go.disabled) return;
-  go.disabled = true;
-  invoke('transfer_parse_payload', {input: v}).then(meta => {
-    hint.textContent = '链接有效，已开始下载，进度会出现在下方记录里。';
-    toast('已开始下载', '取回链接有效');
-    $('#retrieveInput').value = '';
-    retrievePop.classList.remove('show');
-    retrieveBtn.setAttribute('aria-expanded', 'false');
-    const rec = {
-      time: nowIso(), kind: 'file', dir: 'in',
-      name: meta.name, size: meta.size || 0,
-      state: 'downloading', bytes_done: 0,
-      fingerprint: meta.fingerprint || ''
-    };
-    const art = addRecord(rec);
-    const card = $('.filecard', art);
-    return invoke('transfer_confirm_download', {sessionId: meta.session_id}).then(res => {
-      if (res.already_done){
-        // 幂等：该文件已取回过（§9.4 已消费缓存）
-        rec.state = 'downloaded';
-        rec.final_path = res.final_path || '';
-        rec.bytes_done = rec.size;
-        saveConfig(); renderStream();
-        toast('该文件已取回过', '不会重复下载');
-        return;
-      }
-      rec.task_id = res.task_id;
-      liveTasks.set(res.task_id, {record: rec, el: card});
-      saveConfig();
-      // 补偿：终态事件可能早于本次注册已发出
-      setTimeout(() => pollFinalState(res.task_id), 300);
-    });
-  }).catch(e => {
-    const msg = String(e && e.message || e).slice(0, 120);
-    hint.classList.add('bad');
-    hint.textContent = msg;
-    // 失败也要显式反馈，否则看起来就是「点了没反应」
-    toast('无法解析取回链接', msg, 'err');
-  }).finally(() => { go.disabled = false; });
-}
-$('#retrieveGo').addEventListener('click', parseRetrieve);
-$('#retrieveInput').addEventListener('keydown', e => { if (e.key === 'Enter') parseRetrieve(); });
 
 /* ===================== 添加菜单 / 拖拽 ===================== */
 const addMenu = $('#addMenu'), addBtn = $('#btnAdd');
@@ -1315,10 +1406,8 @@ $('#toggleSecret')?.addEventListener('click', () => {
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (expand.classList.contains('show')){ closeExpand(); return; }
-  if (retrievePop.classList.contains('show')){
-    retrievePop.classList.remove('show'); retrieveBtn.setAttribute('aria-expanded','false'); return;
-  }
   closeAddMenu();
+  if (rvOverlay.classList.contains('show')){ closeRetrieve(); return; }
   $$('.overlay').forEach(o => o.classList.remove('show'));
 });
 

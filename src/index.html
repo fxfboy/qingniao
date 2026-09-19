@@ -60,20 +60,10 @@
         <span class="s up"><i></i><span id="statUp">发出 0</span></span>
         <span class="s down"><i></i><span id="statDown">接收 0</span></span>
       </div>
-      <div class="pop-wrap">
-        <button class="chat-act" id="retrieveBtn" data-od-id="retrieve-btn" aria-expanded="false" aria-controls="retrievePop" title="粘贴群里的取回链接">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/><path d="M4 3h16"/></svg>
-          取回文件
-        </button>
-        <div class="popover" id="retrievePop" role="dialog" aria-label="取回文件">
-          <label for="retrieveInput">下载链接或加密载荷</label>
-          <div class="prow">
-            <input type="text" id="retrieveInput" spellcheck="false" placeholder="http://127.0.0.1:9876/dl?t=…" />
-            <button class="pgo" id="retrieveGo">解析</button>
-          </div>
-          <p class="phint" id="retrieveHint">群消息里的链接点不开时，把整条链接粘进来一样能取回文件。解析后会作为一条记录出现在下方。</p>
-        </div>
-      </div>
+      <button class="chat-act" id="retrieveBtn" data-od-id="retrieve-btn" aria-haspopup="dialog" title="粘贴群里的取回链接">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/><path d="M4 3h16"/></svg>
+        取回文件
+      </button>
       <button class="chat-act danger" id="clearBtn" data-od-id="clear-history" title="清空消息记录">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
         清空记录
@@ -254,6 +244,111 @@
       <div class="spacer"></div>
       <button class="btn-secondary" id="confirmCancel">取消</button>
       <button class="btn-primary" id="confirmSend">发送</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 取回文件：地址栏就是输入框，视口渲染本机服务真实会返回的取回页 -->
+<div class="overlay" id="retrieveOverlay" data-od-id="retrieve-overlay" role="dialog" aria-modal="true" aria-labelledby="retrieveTitle">
+  <div class="modal rv-modal" role="document">
+    <header>
+      <div class="m-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/><path d="M4 3h16"/></svg>
+        <h2 id="retrieveTitle">取回文件</h2>
+      </div>
+      <button class="close" id="rvClose" aria-label="关闭">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+
+    <div class="rv-shell">
+      <div class="rv-chrome">
+        <div class="rv-url">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <input type="text" id="rvInput" spellcheck="false" autocomplete="off" aria-label="下载链接或取回码" placeholder="http://127.0.0.1:9876/dl?t=…" />
+        </div>
+        <button class="rv-go" id="rvGo">打开取回页</button>
+      </div>
+
+      <div class="rv-viewport" id="rvViewport">
+        <!-- 空白页 -->
+        <div class="rv-screen on" data-screen="empty">
+          <div class="rv-ph">
+            <span class="rv-ph-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M4 19h16"/></svg>
+            </span>
+            <b>把取回链接粘到地址栏</b>
+            <span>群里的链接在这台机器上点不开时，把整条链接粘进来，青鸟会用本机服务把取回页打开；也可以只粘 <code>t=</code> 后面那段取回码。</span>
+          </div>
+        </div>
+
+        <!-- 打不开：像浏览器一样给一张错误页，而不是弹一条提示 -->
+        <div class="rv-screen" data-screen="error">
+          <div class="rv-ph bad">
+            <span class="rv-ph-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/></svg>
+            </span>
+            <b id="rvErrTitle">无法打开这个地址</b>
+            <span id="rvErrMsg">把群里那条取回链接整条粘进来，或只粘 t= 后面那段取回码。</span>
+            <code>http://127.0.0.1:9876/dl?t=…</code>
+          </div>
+        </div>
+
+        <!-- 取回页 -->
+        <div class="rv-screen" data-screen="page">
+          <div class="rv-page">
+            <main class="rv-card">
+              <section class="rv-stage on" data-stage="pending" aria-labelledby="rvH1">
+                <h1 id="rvH1">有一个文件等你取回</h1>
+                <p class="rv-lede">这是从另一台机器发过来的文件，全程端到端加密，飞书那边只有密文。</p>
+                <div class="rv-file">
+                  <div class="fico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+                  </div>
+                  <div class="finfo">
+                    <b id="rvFileName"></b>
+                    <div class="m"><span id="rvFileSize"></span><span id="rvFileExt"></span></div>
+                  </div>
+                </div>
+                <div class="rv-kv">
+                  <div class="row"><span class="k">发送时间</span><span class="v" id="rvSentTime"></span></div>
+                  <div class="row"><span class="k">剩余有效期</span><span class="v mono hot" id="rvTtl">--:--</span></div>
+                  <div class="row"><span class="k">保存到</span><span class="v mono" id="rvSaveDir"></span></div>
+                </div>
+                <div class="rv-acts">
+                  <button class="rv-btn" id="rvStart">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M4 19h16"/></svg>
+                    开始下载
+                  </button>
+                  <span class="tail">按下才会真正下载</span>
+                </div>
+                <div class="rv-note">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  <span>打开这个页面不会产生任何动作 —— 浏览器预取、飞书链接预览、杀毒软件扫描都碰不到你的文件。只有你按下按钮，青鸟才会真正开始下载。</span>
+                </div>
+              </section>
+
+              <section class="rv-stage" data-stage="started" aria-labelledby="rvH2">
+                <h1 id="rvH2">已开始下载</h1>
+                <p class="rv-lede">进度在青鸟的消息记录里，这个页面可以关掉了。</p>
+                <div class="rv-path">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                  <code id="rvPath"></code>
+                </div>
+              </section>
+            </main>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div class="left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        取回页由本机服务渲染，链接 10 分钟内有效
+      </div>
+      <div class="spacer"></div>
+      <button class="btn-secondary" id="rvCloseBtn">关闭</button>
     </footer>
   </div>
 </div>
