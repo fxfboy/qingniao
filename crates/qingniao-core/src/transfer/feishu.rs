@@ -5,11 +5,7 @@
 //! 每次 Drive 调用经由 [`Quota`] 发出即计数（§6.5）。
 
 use crate::transfer::quota::Quota;
-use base64::engine::general_purpose::STANDARD as B64;
-use base64::Engine as _;
-use hmac::{Hmac, Mac};
 use serde_json::Value;
-use sha2::Sha256;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -305,15 +301,7 @@ impl FeishuClient {
     }
 }
 
-/* ===================== webhook 签名（自 main.js 下沉，P2） ===================== */
-
-/// 飞书自定义机器人签名：sign = base64(hmac_sha256(key=`{ts}\n{secret}`, msg=""))
-pub fn webhook_sign(secret: &str, ts: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(format!("{ts}\n{secret}").as_bytes())
-        .expect("HMAC key 任意长度合法");
-    mac.update(b"");
-    B64.encode(mac.finalize().into_bytes())
-}
+/* ===================== webhook 签名（M1：去重，统一走 message::hmac_sign） ===================== */
 
 /// 组装「仅链接」交互式卡片（D3：仅链接，载体由富文本 post 改为 interactive card）：
 /// 头部为品牌色（turquoise）标题 + 副标题（链接有效期）+ 文件图标/文件名（超链接指向取回链接）
@@ -352,7 +340,7 @@ pub fn build_transfer_card(file_name: &str, size: u64, link: &str, ts: i64) -> V
                 {
                     "tag": "note",
                     "elements": [{ "tag": "plain_text", "content":
-                        "💻 取回只能在安装了青鸟的电脑上完成，手机端不支持"
+                        "💻 取回只能在电脑端完成（青鸟 APP 或 CLI），手机端不支持"
                     }]
                 },
                 {
@@ -436,7 +424,7 @@ pub fn send_webhook_json(url: &str, payload: &Value, secret: Option<&str>) -> Re
             let ts = crate::transfer::crypto::now_unix().to_string();
             if let Some(obj) = payload.as_object_mut() {
                 obj.insert("timestamp".into(), Value::from(ts.clone()));
-                obj.insert("sign".into(), Value::from(webhook_sign(sec, &ts)));
+                obj.insert("sign".into(), Value::from(crate::message::hmac_sign(sec, &ts)));
             }
         }
     }
@@ -451,14 +439,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn webhook_sign_matches_reference() {
+    fn webhook_sign_via_message_hmac_sign_matches_reference() {
         // 与前端 Web Crypto 实现同语义：HMAC-SHA256(key=ts+"\n"+secret, msg="")
-        let s = webhook_sign("test-secret", "1700000000");
+        let s = crate::message::hmac_sign("test-secret", "1700000000");
         assert!(!s.is_empty());
         // 已知一致性用例：同输入同输出
-        assert_eq!(s, webhook_sign("test-secret", "1700000000"));
-        assert_ne!(s, webhook_sign("other-secret", "1700000000"));
-        assert_ne!(s, webhook_sign("test-secret", "1700000001"));
+        assert_eq!(s, crate::message::hmac_sign("test-secret", "1700000000"));
+        assert_ne!(s, crate::message::hmac_sign("other-secret", "1700000000"));
+        assert_ne!(s, crate::message::hmac_sign("test-secret", "1700000001"));
     }
 
     #[test]
@@ -478,8 +466,8 @@ mod tests {
         // footer：发送时间（到分钟）+ 过期提示
         assert!(text.contains("发出"));
         assert!(text.contains("过期后请让对方重新发送"));
-        // 端限制提示：手机端不支持，须在安装了青鸟的电脑上取回
-        assert!(text.contains("取回只能在安装了青鸟的电脑上完成，手机端不支持"));
+        // 端限制提示（C11/M0c）：电脑端（青鸟 APP 或 CLI）
+        assert!(text.contains("取回只能在电脑端完成（青鸟 APP 或 CLI），手机端不支持"));
         assert_eq!(v["card"]["elements"][1]["actions"][0]["url"], "http://127.0.0.1:9876/dl?t=xyz");
         assert_eq!(v["card"]["elements"][1]["actions"][0]["text"]["content"], "取回文件");
         // 结构：0 文件信息 div → 1 取回按钮 → 2 分界线 → 3 端限制 note → 4 发送时间 note
@@ -487,7 +475,7 @@ mod tests {
         assert_eq!(v["card"]["elements"][3]["tag"], "note");
         assert_eq!(
             v["card"]["elements"][3]["elements"][0]["content"],
-            "💻 取回只能在安装了青鸟的电脑上完成，手机端不支持"
+            "💻 取回只能在电脑端完成（青鸟 APP 或 CLI），手机端不支持"
         );
         assert_eq!(v["card"]["elements"][4]["tag"], "note");
     }
@@ -603,7 +591,7 @@ mod tests {
                           "url": "http://127.0.0.1:9876/dl?t=xyz" } ] },
                     { "tag": "hr" },
                     { "tag": "note", "elements": [ { "tag": "plain_text",
-                      "content": "💻 取回只能在安装了青鸟的电脑上完成，手机端不支持" } ] },
+                      "content": "💻 取回只能在电脑端完成（青鸟 APP 或 CLI），手机端不支持" } ] },
                     { "tag": "note", "elements": [ { "tag": "plain_text",
                       "content": "⏳ <TIME> 发出 · 过期后请让对方重新发送" } ] }
                 ]

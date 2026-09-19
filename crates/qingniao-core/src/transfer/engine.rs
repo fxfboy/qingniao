@@ -27,6 +27,9 @@ use std::time::Instant;
 
 /* ===================== 宿主接口（M0a：全部 tauri 耦合收敛到这一点） ===================== */
 
+/// 本地服务默认端口（自 src-tauri/service.rs 下沉，M0c：链接端口来源改为配置值）
+pub const DEFAULT_LOCAL_PORT: u16 = 9876;
+
 /// 引擎与宿主环境的**唯一**接口。
 ///
 /// APP 传 Tauri 实现（`src-tauri/src/transfer/mod.rs` 的 `TauriHost`）；
@@ -39,6 +42,9 @@ pub trait Host: Send + Sync {
     fn config_dir(&self) -> Result<PathBuf, String>;
     /// 下载落地目录（= 配置项，空则系统下载目录；不存在时创建）
     fn resolve_download_dir(&self) -> Result<String, String>;
+    /// 链接端口口径（D23/M0c）：写入取回链接的 configured_port——
+    /// 接收端据它拨号，与发送端本机服务的运行时状态无关
+    fn configured_port(&self) -> u16;
     /// 本机本地服务当前实际绑定的端口；`None` = 未运行
     fn service_bound_port(&self) -> Option<u16>;
     /// 进度事件（`transfer://progress`）
@@ -53,11 +59,13 @@ pub struct FixedHost {
     /// `None` 或空串 ⇒ `$HOME/Downloads`
     pub download_dir: Option<String>,
     pub service_port: Option<u16>,
+    /// 写进取回链接的端口（D23）；缺省 [`DEFAULT_LOCAL_PORT`]
+    pub configured_port: u16,
 }
 
 impl FixedHost {
     pub fn new(config_dir: PathBuf) -> Self {
-        Self { config_dir, download_dir: None, service_port: None }
+        Self { config_dir, download_dir: None, service_port: None, configured_port: DEFAULT_LOCAL_PORT }
     }
     pub fn with_download_dir(mut self, dir: impl Into<String>) -> Self {
         self.download_dir = Some(dir.into());
@@ -65,6 +73,10 @@ impl FixedHost {
     }
     pub fn with_service_port(mut self, port: Option<u16>) -> Self {
         self.service_port = port;
+        self
+    }
+    pub fn with_configured_port(mut self, port: u16) -> Self {
+        self.configured_port = port;
         self
     }
 }
@@ -85,6 +97,7 @@ impl Host for FixedHost {
         Ok(dir.to_string_lossy().to_string())
     }
 
+    fn configured_port(&self) -> u16 { self.configured_port }
     fn service_bound_port(&self) -> Option<u16> { self.service_port }
     fn progress(&self, _payload: serde_json::Value) {}
     fn downloaded(&self, _payload: serde_json::Value) {}
@@ -180,6 +193,14 @@ pub struct UploadAccepted {
     pub task_id: String,
     pub name: String,
     pub size: u64,
+}
+
+/// CLI 同步发送结果（M1）
+pub struct SendOutcome {
+    /// 取回链接（已写入卡片并发到群）
+    pub link: String,
+    /// M0c 告警：本机接收服务未运行（不构成失败）
+    pub warning: Option<String>,
 }
 
 /// 一次待确认的下载（会话）
@@ -341,8 +362,8 @@ impl Engine {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "file".into());
 
-        // 主密钥必须已配置（无 K 无法加密）
-        let key_hex = keyring_store::get_current()?
+        // 主密钥必须已配置（无 K 无法加密）；经 KeySource（M0a 接缝），生产 = keyring
+        let key_hex = self.keys.current()?
             .ok_or_else(|| "尚未配置传输密钥：请先在设置 · 文件传输中生成或导入".to_string())?;
         let key = crypto::key_from_hex(&key_hex)?;
 
@@ -360,9 +381,12 @@ impl Engine {
         std::thread::Builder::new()
             .name(format!("qn-upload-{task_id}"))
             .spawn(move || match upload_inner(host.as_ref(), &quota, &task_id2, &cancel, &req, &key, &app_id, &app_secret, size) {
-                Ok(link) => {
+                Ok((link, warning)) => {
                     emit_progress(host.as_ref(), &task_id2, "out", "done", size, size, size, size, None, Some(&link), None);
-                    engine.record_final(&task_id2, serde_json::json!({"state":"done","dir":"out","link":link}));
+                    engine.record_final(&task_id2, serde_json::json!({
+                        "state":"done","dir":"out","link":link,
+                        "warning": warning,
+                    }));
                 }
                 Err(msg) => {
                     let state = if cancel.load(Ordering::Relaxed) { "cancelled" } else { "failed" };
@@ -373,6 +397,48 @@ impl Engine {
             .map_err(|e| format!("启动上传线程失败: {e}"))?;
 
         Ok(UploadAccepted { task_id, name, size })
+    }
+
+    /// CLI 同步发送（M1）：加密上传 + 发卡片，**当前线程**完成（无后台任务、无进度事件）。
+    /// 返回取回链接与本机接收告警（M0c：本机服务未运行不构成失败）。
+    /// 额度计入与 APP 共享的同一 `quota.json`（同一 work_dir）。
+    pub fn send_file_sync(&self, req: &UploadRequest) -> Result<SendOutcome, String> {
+        let app_id = self.app_id_of()?;
+        let app_secret = self.app_secret_of()?;
+        if app_id.is_empty() || app_secret.is_empty() {
+            return Err("未配置飞书应用凭证（App ID / App Secret）".into());
+        }
+        if req.webhook_url.is_empty() {
+            return Err("未指定发送目标机器人".into());
+        }
+        let path = PathBuf::from(&req.path);
+        let meta = std::fs::metadata(&path).map_err(|e| format!("无法读取文件: {e}"))?;
+        if !meta.is_file() {
+            return Err("路径不是一个文件".into());
+        }
+        let size = meta.len();
+        if size > MAX_FILE_SIZE {
+            return Err(format!("单文件不能超过 {} MB（D18）", MAX_FILE_SIZE / 1024 / 1024));
+        }
+
+        let key_hex = self.keys.current()?
+            .ok_or_else(|| "尚未配置传输密钥：请先在 APP 设置或 CLI 中生成/导入".to_string())?;
+        let key = crypto::key_from_hex(&key_hex)?;
+
+        let task_id = crypto::hex(&crypto::random_bytes(8));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (link, warning) = upload_inner(
+            self.host.as_ref(),
+            &self.quota,
+            &task_id,
+            &cancel,
+            req,
+            &key,
+            &app_id,
+            &app_secret,
+            size,
+        )?;
+        Ok(SendOutcome { link, warning })
     }
 
     /// 取消任务（cooperative：在下一个片边界生效）
@@ -907,7 +973,7 @@ fn upload_inner(
     app_id: &str,
     app_secret: &str,
     total: u64,
-) -> Result<String, String> {
+) -> Result<(String, Option<String>), String> {
     let t0 = Instant::now();
     let client = FeishuClient::new(app_id, app_secret, quota.clone())?;
 
@@ -974,10 +1040,10 @@ fn upload_inner(
     };
     let payload = seal_payload(key, &env)?;
 
-    // 5. 链接只用实际绑定端口（P0-3：禁止写死 configured_port）
-    let bound_port = host.service_bound_port()
-        .ok_or_else(|| "本地服务未运行，无法生成取回链接：请先在设置中启动本地服务".to_string())?;
-    let link = format!("http://127.0.0.1:{bound_port}/dl?t={payload}");
+    // 5. 链接端口 = 配置端口（D23/M0c）：接收端据 configured_port 拨号，
+    //    与发送端本机服务的运行时状态无关；本机服务未运行只影响本机接收 → 告警不拒绝
+    let link = build_transfer_link(host.configured_port(), &payload);
+    let warning = service_unavailable_warning(host);
 
     // 6. 仅链接形式发群（D3/D4）；webhook 不计入月度额度
     let card = build_transfer_card(&display_name, total, &link, sent_ts);
@@ -985,7 +1051,18 @@ fn upload_inner(
     if !(200..300).contains(&status) {
         return Err(format!("取回链接发送失败：HTTP {status} {body}"));
     }
-    Ok(link)
+    Ok((link, warning))
+}
+
+/// M0c：本机接收服务不在运行 → 上传照常成功，但返回该告警（不作为 Err）
+fn service_unavailable_warning(host: &dyn Host) -> Option<String> {
+    (host.service_bound_port().is_none())
+        .then(|| "链接已生成，但本机当前无法接收对方回传的文件".to_string())
+}
+
+/// 取回链接组装（D23：端口 = 配置值 configured_port，非本机运行时端口）
+fn build_transfer_link(configured_port: u16, payload: &str) -> String {
+    format!("http://127.0.0.1:{configured_port}/dl?t={payload}")
 }
 
 fn feishu_msg(e: crate::transfer::feishu::FeishuError) -> String {
@@ -1102,5 +1179,34 @@ mod tests {
         // 链接新鲜度窗口内创建 → 会话未过期；窗口外 → 已过期
         assert!(crypto::now_unix() <= expires);
         assert!(crypto::now_unix() > session_expires_at(crypto::now_unix() - crypto::FRESHNESS_WINDOW_SECS - 1));
+    }
+
+    /* ===== M0c：链接端口与接收告警（D23） ===== */
+
+    /// ① 服务未运行 / 端口不可得时，仍产出 configured_port 的 URL
+    #[test]
+    fn m0c_link_uses_configured_port_even_without_service() {
+        let host = FixedHost::new(PathBuf::from("/tmp/qn-m0c"))
+            .with_configured_port(12345)
+            .with_service_port(None);
+        assert_eq!(host.configured_port(), 12345);
+        assert_eq!(
+            build_transfer_link(host.configured_port(), "abc-_123XYZ"),
+            "http://127.0.0.1:12345/dl?t=abc-_123XYZ"
+        );
+        // 缺省 = DEFAULT_LOCAL_PORT
+        assert_eq!(FixedHost::new(PathBuf::from("/tmp/qn-m0c")).configured_port(), DEFAULT_LOCAL_PORT);
+    }
+
+    /// ② 服务未运行时上传路径返回告警而非 Err；运行中则无告警
+    #[test]
+    fn m0c_service_down_yields_warning_not_error() {
+        let down = FixedHost::new(PathBuf::from("/tmp/qn-m0c")).with_service_port(None);
+        assert_eq!(
+            service_unavailable_warning(&down).as_deref(),
+            Some("链接已生成，但本机当前无法接收对方回传的文件")
+        );
+        let up = FixedHost::new(PathBuf::from("/tmp/qn-m0c")).with_service_port(Some(DEFAULT_LOCAL_PORT));
+        assert_eq!(service_unavailable_warning(&up), None);
     }
 }

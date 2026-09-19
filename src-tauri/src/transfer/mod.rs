@@ -67,6 +67,24 @@ impl Host for TauriHost {
         Ok(dir.to_string_lossy().to_string())
     }
 
+    /// 链接端口口径（D23/M0c）：读配置 `/transfer/configured_port`，缺省 [`engine::DEFAULT_LOCAL_PORT`]。
+    /// 与 `lib.rs` 启动本地服务的取值同一来源，不读运行时状态。
+    fn configured_port(&self) -> u16 {
+        self.config_dir()
+            .ok()
+            .and_then(|dir| {
+                let cfg_path = dir.join("qingniao.json");
+                std::fs::read_to_string(&cfg_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                    .and_then(|v| {
+                        v.pointer("/transfer/configured_port").and_then(|x| x.as_u64())
+                    })
+                    .and_then(|p| u16::try_from(p).ok())
+            })
+            .unwrap_or(engine::DEFAULT_LOCAL_PORT)
+    }
+
     fn service_bound_port(&self) -> Option<u16> {
         crate::service_bound_port(&self.app)
     }
