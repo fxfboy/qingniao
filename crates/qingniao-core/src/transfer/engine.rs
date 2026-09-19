@@ -183,21 +183,39 @@ impl FingerprintLock {
     }
 
     /// 清理孤儿锁文件（实现约束③，Engine::open 时执行）：
-    /// flock 随进程消亡，因此「当前能独占锁住」的 .lock 必然无人持有 → 删除。
+    /// flock 随进程消亡，因此「当前能独占锁住」的指纹锁必然无人持有 → 删除。
+    ///
+    /// **只清指纹锁**（D33）：文件名必须是 `<64 位小写 hex>.lock`
+    /// （payload_fingerprint = sha256 hex）。statefile 的锁专用旁文件
+    /// `<name>.json.lock` 同样以 `.lock` 结尾——放宽匹配会把这 4 个常驻锁文件
+    /// 当孤儿扫掉，并在「他人 open 之后、try_lock 之前」的窗口拆锁、破坏互斥。
     fn sweep_orphans(work_dir: &std::path::Path) {
         let Ok(entries) = std::fs::read_dir(work_dir) else { return };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map(|e| e == "lock").unwrap_or(false) {
-                if let Ok(f) = OpenOptions::new().write(true).open(&path) {
-                    if f.try_lock().is_ok() {
-                        let _ = std::fs::remove_file(&path);
-                        // f drop → 解锁
-                    }
+            if !is_fingerprint_lock_path(&path) {
+                continue;
+            }
+            if let Ok(f) = OpenOptions::new().write(true).open(&path) {
+                if f.try_lock().is_ok() {
+                    let _ = std::fs::remove_file(&path);
+                    // f drop → 解锁
                 }
             }
         }
     }
+}
+
+/// 指纹锁路径判定：`<64 位小写 hex>.lock`。**不得放宽**——
+/// statefile 的锁专用文件 `quota.json.lock` / `consumed.json.lock` /
+/// `pending_deletes.json.lock` / `cleanup.json.lock`（D33）都不得被当孤儿扫掉。
+fn is_fingerprint_lock_path(path: &std::path::Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
+    let Some(stem) = name.strip_suffix(".lock") else { return false };
+    stem.len() == 64
+        && stem
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// 单任务控制块
@@ -891,7 +909,10 @@ impl Engine {
         let list: Vec<String> = {
             let (_guard, disk) = match super::statefile::with_exclusive(&path) {
                 Ok(x) => x,
-                Err(_) => return,
+                Err(e) => {
+                    log::warn!("pending_deletes.json 加锁失败，跳过本轮重试: {e}");
+                    return;
+                }
             };
             disk.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
         };
@@ -1266,6 +1287,7 @@ pub(crate) fn write_part_chunk(part: &mut std::fs::File, off: u64, data: &[u8]) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn extract_payload_accepts_link_and_bare_payload() {
@@ -1330,5 +1352,84 @@ mod tests {
         let down = FixedHost::new(PathBuf::from("/tmp/qn-m0c")).with_service_port(None);
         // Host 的 service_bound_port 仅剩查询语义；无任何告警产生路径
         assert_eq!(down.service_bound_port(), None);
+    }
+
+    /* ===== D33：sweep_orphans 只清指纹锁 ===== */
+
+    fn sweep_temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("qn-sweep-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// statefile 的 4 个常驻锁专用文件（`<name>.json.lock`）不得被当孤儿扫掉
+    /// （否则会在「他人 open 之后、try_lock 之前」的窗口拆锁、破坏互斥）；
+    /// 名字不合规的 `.lock` 同样保留；无人持锁的孤儿指纹锁（`<64hex>.lock`）仍删。
+    #[test]
+    fn sweep_orphans_spares_state_lock_files_and_illegal_names() {
+        let dir = sweep_temp_dir("shape");
+        let hex64 = "a".repeat(64);
+        let kept: Vec<String> = vec![
+            // statefile 锁专用文件（D33）
+            "quota.json.lock".into(),
+            "consumed.json.lock".into(),
+            "pending_deletes.json.lock".into(),
+            "cleanup.json.lock".into(),
+            // 名字不合规：太短 / 混大写 / 非 hex
+            "abc.lock".into(),
+            "deadbeef.lock".into(),
+            format!("{}B{}.lock", "a".repeat(31), "a".repeat(32)),
+            format!("{}.lock", "g".repeat(64)),
+        ];
+        for n in &kept {
+            std::fs::write(dir.join(n), b"").unwrap();
+        }
+        let orphan = dir.join(format!("{hex64}.lock"));
+        std::fs::write(&orphan, b"").unwrap();
+
+        FingerprintLock::sweep_orphans(&dir);
+
+        assert!(!orphan.exists(), "无人持锁的孤儿指纹锁必须被删除");
+        for n in &kept {
+            assert!(dir.join(n).exists(), "{n} 不得被扫掉");
+        }
+        // 数据文件本体不受影响（不匹配 *.lock 的名字一律跳过）
+        std::fs::write(dir.join("quota.json"), b"{}").unwrap();
+        FingerprintLock::sweep_orphans(&dir);
+        assert!(dir.join("quota.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 既有语义保持：正被持有的指纹锁不删（flock 在持锁者 fd 上，sweep 锁不上）；
+    /// 释放后即成为孤儿，可被下一轮清掉。
+    #[test]
+    fn sweep_orphans_spares_held_fingerprint_lock_until_released() {
+        let dir = sweep_temp_dir("held");
+        let hex64 = "b".repeat(64);
+        let guard = FingerprintLock::try_acquire(&dir, &hex64).unwrap().expect("获取指纹锁");
+        let path = dir.join(format!("{hex64}.lock"));
+        FingerprintLock::sweep_orphans(&dir);
+        assert!(path.exists(), "正被持有的指纹锁不得被扫掉");
+        drop(guard);
+        FingerprintLock::sweep_orphans(&dir);
+        assert!(!path.exists(), "释放后即成孤儿，应被删除");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 纯函数：路径形状判定逐类钉死
+    #[test]
+    fn fingerprint_lock_path_shape() {
+        let ok = |stem: String| is_fingerprint_lock_path(Path::new(&format!("/w/{stem}.lock")));
+        assert!(ok("c".repeat(64)));
+        assert!(ok("0123456789abcdef".repeat(4)));
+        assert!(!ok("A".repeat(64)), "大写 hex 不是指纹锁");
+        assert!(!ok("g".repeat(64)), "非 hex 字符不是指纹锁");
+        assert!(!ok("a".repeat(63)), "长度必须恰为 64");
+        assert!(!ok("a".repeat(65)), "长度必须恰为 64");
+        assert!(!ok("quota.json".into()), "statefile 锁专用文件不是指纹锁");
+        assert!(!is_fingerprint_lock_path(Path::new("/w/abc.lock")));
+        assert!(!is_fingerprint_lock_path(Path::new("/w/orphan.lock")));
+        assert!(!is_fingerprint_lock_path(Path::new("/w/noext")));
     }
 }
