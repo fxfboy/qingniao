@@ -874,39 +874,65 @@ impl Engine {
         log::warn!("删除分片失败 {} 个，已进入重试队列（定期清理兜底）", tokens.len());
     }
 
-    /// 启动时重试删除队列（删除请求已发出但响应丢失 → 404 即成功）
+    /// 启动时重试删除队列（删除请求已发出但响应丢失 → 404 即成功）。
+    ///
+    /// D32：锁纪律（清理方案 §5.1）——绝不在持状态文件锁期间发网络请求。三段式：
+    /// ① 锁内读出全部待删 token（文件不动，**重试中途崩溃零丢失**）；
+    /// ② 锁外逐个重试；
+    /// ③ 锁内重读并按结果改写——成功者移除；失败者与期间其他进程经
+    ///    `queue_pending_deletes` 新入队的 token 一律保留（合并去重，非整表覆盖）。
+    /// 语义与 D29 相反：本队列是**在线路径**，失败必须留队列重试，勿混。
     pub fn retry_pending_deletes(&self, app_id: &str, app_secret: &str) {
+        if app_id.is_empty() {
+            return;
+        }
         let path = self.work_dir.join("pending_deletes.json");
-        // 锁内重读（另一进程可能刚入队）→ 逐个重试（404 即成功）→ 原子写余量
+        // ① 锁内读出（读完立即释放锁，文件内容原样保留）
         let list: Vec<String> = {
-            let (guard, disk) = match super::statefile::with_exclusive(&path) {
+            let (_guard, disk) = match super::statefile::with_exclusive(&path) {
                 Ok(x) => x,
                 Err(_) => return,
             };
-            let list: Vec<String> = disk
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default();
-            if list.is_empty() || app_id.is_empty() {
-                drop(guard);
-                return;
-            }
-            let client = match FeishuClient::new(app_id, app_secret, self.quota.clone()) {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-            let mut remain = Vec::new();
-            for t in &list {
-                match client.delete_file(t) {
-                    Ok(()) => {}
-                    Err(e) if e.http_status == 404 => {}
-                    Err(_) => remain.push(t.clone()),
+            disk.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+        };
+        if list.is_empty() {
+            return;
+        }
+        // ② 锁外逐个重试（404 已在 delete_file 内归一为 Ok）
+        let client = match FeishuClient::new(app_id, app_secret, self.quota.clone()) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let mut succeeded: std::collections::HashSet<String> = Default::default();
+        let mut failed: std::collections::HashSet<String> = Default::default();
+        for t in &list {
+            match client.delete_file(t) {
+                Ok(()) => {
+                    succeeded.insert(t.clone());
+                }
+                Err(_) => {
+                    failed.insert(t.clone());
                 }
             }
-            let _ = super::statefile::atomic_write(&path, &serde_json::to_value(&remain).unwrap_or_default());
-            remain
-        };
-        if !list.is_empty() {
-            log::info!("删除重试后仍有 {} 个未清除", list.len());
+        }
+        // ③ 锁内重读并按结果改写（成功者移除；失败者与期间新入队者保留）
+        let r = super::statefile::update::<Vec<String>, _>(&path, |disk| {
+            let mut cur: Vec<String> = disk
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            cur.retain(|t| !succeeded.contains(t));
+            for t in &failed {
+                if !cur.contains(t) {
+                    cur.push(t.clone());
+                }
+            }
+            Ok(cur)
+        });
+        if r.is_err() {
+            log::warn!("pending_deletes.json 改写失败（失败条目仍在原文件中，下次启动重试）");
+        }
+        if !failed.is_empty() {
+            log::info!("删除重试后仍有 {} 个未清除", failed.len());
         }
     }
 
