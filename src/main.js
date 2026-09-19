@@ -1343,55 +1343,86 @@ $$('#configOverlay .nav button').forEach(b => {
 });
 
 /* ===================== Agent tab（CLI / 技能安装，模仿 paseo，方案 v3 §七） ===================== */
+// 徽标三态：默认绿色（已安装/最新）、off（未安装、未打包，中性描边）、warn（有更新、检测失败）
 function agentBadge(el, text, kind){
-  el.textContent = text;
-  el.style.background = kind === 'ok' ? 'rgba(52,199,89,.15)' : kind === 'warn' ? 'rgba(255,159,10,.18)' : 'var(--track)';
-  el.style.color = kind === 'ok' ? '#34c759' : kind === 'warn' ? '#ff9f0a' : 'var(--muted)';
+  if (!el) return;
+  el.innerHTML = (kind === 'ok' ? OK_ICO : '') + esc(text);
+  el.classList.toggle('off', kind === 'off');
+  el.classList.toggle('warn', kind === 'warn');
 }
+/// 「已安装」徽标带版本号：CLI 与 APP 同属一个 workspace，版本号随发行同步
+let appVersion;
+async function currentAppVersion(){
+  if (appVersion === undefined){
+    try{ appVersion = (TAURI && TAURI.app && await TAURI.app.getVersion()) || ''; }
+    catch(e){ appVersion = ''; }
+  }
+  return appVersion;
+}
+// Windows 的安装位置是 %LOCALAPPDATA%\qingniao\bin（复制而非符号链接），凭路径形态区分平台
+const isWinPath = p => /^[A-Za-z]:[\\/]/.test(String(p || ''));
+
 async function refreshAgentStatus(){
-  const cliBadge = $('#cliStatusBadge'), cliBtn = $('#cliInstallBtn'), cliHint = $('#cliHint');
-  const skBadge = $('#skillStatusBadge'), skBtn = $('#skillInstallBtn'), skUn = $('#skillUninstallBtn'), skHint = $('#skillHint');
+  const cliBadge = $('#cliStatusBadge'), cliBtn = $('#cliInstallBtn');
+  const cliPath = $('#cliPath'), cliNote = $('#cliNote');
+  const skBadge = $('#skillStatusBadge'), skBtn = $('#skillInstallBtn'), skUn = $('#skillUninstallBtn');
+  const skPaths = $('#skillPaths'), skNote = $('#skillNote');
   if(!invoke){ [cliBtn, skBtn, skUn].forEach(b => { if (b) b.disabled = true; }); return; }
 
   // CLI 与技能各自独立取状态：任何一项失败都不得连坐另一项，
   // 否则两个徽标会永久停在初始的「检测中…」，安装按钮也会一直卡在 disabled。
   try{
     const cli = await invoke('cli_install_status');
-    if (cli.installed){ agentBadge(cliBadge, '已安装', 'ok'); cliBtn.textContent = '重新安装'; }
-    else { agentBadge(cliBadge, cli.source_available ? '未安装' : '未打包', 'idle'); cliBtn.textContent = '安装'; }
+    const win = isWinPath(cli.target_path);
+    if (cli.installed){
+      const ver = await currentAppVersion();
+      agentBadge(cliBadge, '已安装' + (ver ? ' v' + ver : ''), 'ok');
+      cliBtn.textContent = '重新安装';
+    } else {
+      agentBadge(cliBadge, cli.source_available ? '未安装' : '未打包', 'off');
+      cliBtn.textContent = '安装';
+    }
+    cliBtn.classList.toggle('primary', !cli.installed);
     cliBtn.disabled = !cli.source_available;
-    cliHint.textContent = cli.target_path
-      ? ('安装位置: ' + cli.target_path + (cli.installed ? '' : (cli.manual_path_setup
-          ? ' · 安装后需手动把该目录加入 PATH'
-          : ' · 安装后需重开终端使 PATH 生效')))
-      : '';
+    cliPath.textContent = cli.target_path || '—';
+    // 安装位置已单列在路径框里，这行只说明「这是哪种安装」+ PATH 注意事项
+    cliNote.textContent = win
+      ? ('复制到本地 bin 目录，App 升级后重新安装即可更新' + (cli.installed ? '' : ' · 安装后需手动把该目录加入 PATH'))
+      : ('符号链接指向 APP 内置二进制，随 APP 升级自动更新' + (cli.installed ? '' : ' · 安装后需重开终端使 PATH 生效'));
   }catch(e){
     agentBadge(cliBadge, '检测失败', 'warn');
     cliBtn.disabled = false;
-    cliHint.textContent = '状态读取失败：' + String((e && e.message) || e);
+    cliPath.textContent = '—';
+    cliNote.textContent = '状态读取失败：' + String((e && e.message) || e);
   }
 
   try{
     const sk = await invoke('skills_status');
+    // Windows 的技能目录不在 unix home 之下，直接显示后端给的绝对路径
+    skPaths.innerHTML = sk.targets
+      .map(t => '<code>' + esc(isWinPath(t.dir) ? t.dir : ('~/.' + t.label + '/skills')) + '</code>')
+      .join('');
     if (sk.state === 'source-missing'){
       // 安装包未内置 skills/（如 Windows 便携包）：明示「未打包」而非报错
-      agentBadge(skBadge, '未打包', 'idle');
+      agentBadge(skBadge, '未打包', 'off');
       skBtn.textContent = '安装技能';
       skBtn.disabled = true;
-      skHint.textContent = '当前安装包未内置技能源，请改用 npx skills add fxfboy/qingniao';
+      skNote.textContent = '当前安装包未内置技能源，请改用 npx skills add fxfboy/qingniao';
     } else {
       if (sk.state === 'up-to-date') agentBadge(skBadge, '已安装 · 最新', 'ok');
       else if (sk.state === 'drift') agentBadge(skBadge, '有更新', 'warn');
-      else agentBadge(skBadge, '未安装', 'idle');
+      else agentBadge(skBadge, '未安装', 'off');
       skBtn.textContent = sk.state === 'up-to-date' ? '重新同步' : sk.state === 'drift' ? '更新' : '安装技能';
+      skBtn.classList.toggle('primary', sk.state === 'not-installed');
       skBtn.disabled = false;
-      skHint.textContent = '安装到 ' + sk.targets.map(t => '~/' + t.label + '/skills').join('、');
+      skNote.textContent = '托管同步，卸载只删青鸟自己的文件。';
     }
-    skUn.disabled = !sk.targets.some(t => t.installed);
+    // 一个目录都没装过就没有可卸载的东西
+    skUn.hidden = !sk.targets.some(t => t.installed);
   }catch(e){
     agentBadge(skBadge, '检测失败', 'warn');
     skBtn.disabled = false;
-    skHint.textContent = '状态读取失败：' + String((e && e.message) || e);
+    skNote.textContent = '状态读取失败：' + String((e && e.message) || e);
   }
 }
 $('#cliInstallBtn')?.addEventListener('click', async () => {
@@ -1422,6 +1453,11 @@ $('#skillUninstallBtn')?.addEventListener('click', async () => {
     toast('技能已卸载', '只移除了青鸟托管的文件');
   }catch(e){ toast('卸载失败', String(e && e.message || e), 'err'); }
   refreshAgentStatus();
+});
+// 文档入口：仓库 README 的「Agent CLI」一节 + skills/qingniao/SKILL.md
+$('#agentDocsLink')?.addEventListener('click', e => {
+  e.preventDefault();
+  openExternal('https://github.com/fxfboy/qingniao#agent-cliqingniao-命令行');
 });
 
 $('#toggleSecret')?.addEventListener('click', () => {

@@ -451,36 +451,59 @@
       <section class="pane" id="paneAgent">
         <div class="pane-title-row">
           <h3>Agent 集成</h3>
+          <a class="pane-title-link" href="#" id="agentDocsLink">CLI 与 SKILL.md 文档 ↗</a>
         </div>
         <p class="desc">让 <b style="color:var(--fg);font-weight:500">AI Agent</b> 通过命令行调用青鸟发消息、上传图片、查看历史。CLI 与技能只写入本机用户目录。</p>
         <div class="agent-card" data-agent="cli">
           <div class="agent-card-head">
-            <div class="agent-ico cli">&gt;_</div>
+            <div class="agent-ico cli" aria-hidden="true">&gt;_</div>
             <div class="agent-meta">
-              <b>青鸟 CLI <code>qingniao</code></b>
-              <span>在终端里发消息、上传图片、查看历史，支持 <code>--json</code>。符号链接指向 APP 内置二进制，随 APP 升级自动更新</span>
-              <div class="field-hint" id="cliHint"></div>
+              <div class="agent-name">
+                <b>青鸟 CLI</b>
+                <code>qingniao</code>
+                <span class="agent-status off" id="cliStatusBadge">检测中…</span>
+              </div>
+              <span class="agent-desc">在终端里发消息、上传图片、查看历史，支持 <code>--json</code>。</span>
             </div>
-            <div class="agent-card-cta">
-              <span class="agent-status" id="cliStatusBadge">检测中…</span>
-              <button class="btn-secondary" id="cliInstallBtn">安装</button>
+          </div>
+          <div class="agent-body">
+            <div class="agent-paths">
+              <span class="plbl">安装位置</span>
+              <div class="pvals"><code id="cliPath">—</code></div>
+            </div>
+            <div class="agent-foot">
+              <span class="fnote" id="cliNote"></span>
+              <div class="facts">
+                <button class="agent-btn primary" id="cliInstallBtn">安装</button>
+              </div>
             </div>
           </div>
         </div>
         <div class="agent-card" data-agent="skill">
           <div class="agent-card-head">
-            <div class="agent-ico skill">
+            <div class="agent-ico skill" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 7h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h5"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/><circle cx="12" cy="14" r="2"/></svg>
             </div>
             <div class="agent-meta">
-              <b>Agent 技能包 <code>SKILL.md</code></b>
-              <span>让 Claude / Codex 等 Agent 识别青鸟能力，一个 <code>send</code> 就能发出去。托管同步，卸载只删青鸟自己的文件</span>
-              <div class="field-hint" id="skillHint"></div>
+              <div class="agent-name">
+                <b>Agent 技能包</b>
+                <code>SKILL.md</code>
+                <span class="agent-status off" id="skillStatusBadge">检测中…</span>
+              </div>
+              <span class="agent-desc">让 Claude / Codex 等 Agent 识别青鸟能力，一个 <code>send</code> 就能发出去。</span>
             </div>
-            <div class="agent-card-cta">
-              <span class="agent-status" id="skillStatusBadge">检测中…</span>
-              <button class="btn-secondary" id="skillInstallBtn">安装</button>
-              <button class="btn-link" id="skillUninstallBtn">卸载</button>
+          </div>
+          <div class="agent-body">
+            <div class="agent-paths">
+              <span class="plbl">安装到</span>
+              <div class="pvals" id="skillPaths"></div>
+            </div>
+            <div class="agent-foot">
+              <span class="fnote" id="skillNote"></span>
+              <div class="facts">
+                <button class="agent-btn" id="skillInstallBtn">安装技能</button>
+                <button class="agent-btn" id="skillUninstallBtn" hidden>卸载</button>
+              </div>
             </div>
           </div>
         </div>

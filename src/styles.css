@@ -910,24 +910,37 @@
   .pane .pane-title-row .pane-title-link:hover{color: var(--accent-ink); text-decoration:underline}
 
   .agent-card{border:1px solid var(--border); border-radius:12px; background: var(--surface); margin-bottom:14px; overflow:hidden}
-  .agent-card-head{display:grid; grid-template-columns: auto minmax(0,1fr) auto; gap:14px; align-items:center; padding: 14px 16px}
+  .agent-card-head{display:grid; grid-template-columns: auto minmax(0,1fr); gap:12px; align-items:flex-start; padding: 14px 16px 0}
   .agent-ico{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background: var(--surface-soft); border:1px solid var(--border); color: var(--fg)}
   .agent-ico svg{width:18px;height:18px}
   .agent-ico.cli{background: oklch(0.24 0.02 240); color: oklch(0.85 0.09 155); border-color: transparent; font-family: var(--font-mono); font-weight:600; font-size:13px}
   .agent-ico.skill{background: var(--accent-soft); color: var(--accent-ink); border-color: transparent}
   .agent-meta{min-width:0}
-  .agent-meta b{display:block; font-size:13.5px; font-weight:600; color: var(--fg)}
-  .agent-meta b code{font-family: var(--font-mono); font-size:12px; font-weight:500; padding:1px 5px; border-radius:4px; background: var(--surface-soft); color: var(--muted); margin-left:6px; border:1px solid var(--border)}
-  .agent-meta span{display:block; font-size:12px; color: var(--muted); margin-top:2px}
-  .agent-card-cta{display:flex; align-items:center; gap:10px; flex:none}
-  .agent-status{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; padding: 4px 9px; border-radius:999px; background: oklch(0.94 0.05 155); color: var(--ok); font-weight:500; flex:none}
-  .agent-status svg{width:12px;height:12px}
+  .agent-name{display:flex; align-items:center; flex-wrap:wrap; gap:7px; min-width:0}
+  .agent-name b{font-size:13.5px; font-weight:600; color: var(--fg)}
+  .agent-name code{font-family: var(--font-mono); font-size:11.5px; font-weight:500; padding:1px 6px; border-radius:4px; background: var(--surface-soft); color: var(--muted); border:1px solid var(--border); white-space:nowrap}
+  .agent-desc{display:block; font-size:12px; color: var(--muted); margin-top:4px; line-height:1.65}
+  .agent-desc code{font-family: var(--font-mono); font-size:11px; padding:0 4px; border-radius:4px; background: var(--surface-soft); color: var(--fg); white-space:nowrap}
+  .agent-body{padding: 0 16px 14px 68px}
+  .agent-paths{display:flex; align-items:flex-start; gap:14px; margin-top:11px; padding: 9px 12px; border:1px solid var(--border); border-radius:9px; background: var(--surface-soft)}
+  .agent-paths .plbl{flex:none; font-size:11px; color: var(--muted-2); line-height:1.85}
+  .agent-paths .pvals{flex:1 1 0; min-width:0; display:grid; gap:2px}
+  .agent-paths code{font-family: var(--font-mono); font-size:11.5px; color: var(--fg); background:none; border:none; padding:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  .agent-foot{display:flex; align-items:center; gap:12px; margin-top:10px}
+  .agent-foot .fnote{flex:1 1 0; min-width:0; font-size:11.5px; line-height:1.55; color: var(--muted-2)}
+  .agent-foot .facts{display:flex; gap:8px; flex:none}
+  .agent-status{display:inline-flex; align-items:center; gap:5px; font-size:11px; padding: 2.5px 8px; border-radius:999px; background: oklch(0.94 0.05 155); color: var(--ok); font-weight:500; flex:none}
+  .agent-status svg{width:11px;height:11px}
+  .agent-status.off{background: var(--surface-soft); color: var(--muted); border:1px solid var(--border)}
+  .agent-status.warn{background: oklch(0.96 0.06 75); color: oklch(0.45 0.13 75)}
   .agent-btn{padding: 5px 12px; font-size:12.5px; border-radius:7px; border:1px solid var(--border); background: var(--surface); color: var(--muted); transition: color .1s ease, border-color .1s ease}
   .agent-btn:hover{color: var(--fg); border-color: var(--border-strong)}
   .agent-btn.primary{background: var(--accent-fill); color: white; border-color: var(--accent-fill); font-weight:500}
   .agent-btn.primary:hover{background: var(--accent-fill-hover); color:white; border-color: var(--accent-fill-hover)}
-  .agent-card:not(.installed) .installed-only{display:none}
-  .agent-card.installed .not-installed-only{display:none}
+  @media (max-width: 920px){
+    .agent-body{padding-left:16px}
+    .agent-foot{flex-wrap:wrap}
+  }
 
   .pref-section{margin-bottom:22px}
   .pref-section:last-child{margin-bottom:0}
@@ -1339,6 +1352,8 @@
   html[data-theme="dark"] .rv-ph.bad .rv-ph-ico{background: oklch(0.29 0.075 25); color: oklch(0.86 0.14 25)}
   html[data-theme="dark"] .rv-ph.bad b{color: oklch(0.88 0.13 25)}
   html[data-theme="dark"] .agent-status{background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
+  html[data-theme="dark"] .agent-status.off{background: var(--surface-soft); color: var(--muted)}
+  html[data-theme="dark"] .agent-status.warn{background: oklch(0.32 0.08 75); color: oklch(0.9 0.12 75)}
   html[data-theme="dark"] .bot-list-item .meta .tag.ok{background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
   html[data-theme="dark"] .bot-list-item .meta .tag.warn{background: oklch(0.32 0.08 75); color: oklch(0.9 0.12 75)}
   html[data-theme="dark"] .bot-list-confirm{background: oklch(0.28 0.08 25); border-top-color: oklch(0.5 0.14 25)}
