@@ -3040,7 +3040,7 @@ dependencies = [
 
 [[package]]
 name = "qingniao"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "base64 0.22.1",
  "keyring",
@@ -3063,7 +3063,7 @@ dependencies = [
 
 [[package]]
 name = "qingniao-cli"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "clap",
  "log",
@@ -3074,7 +3074,7 @@ dependencies = [
 
 [[package]]
 name = "qingniao-core"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
