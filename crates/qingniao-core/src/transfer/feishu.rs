@@ -41,6 +41,39 @@ impl FeishuError {
     }
 }
 
+/// 列目录返回的单条对象（D30：清理模块需要 created_time 与类型）
+#[derive(Clone, Debug)]
+pub struct ListedFile {
+    pub token: String,
+    pub name: String,
+    /// created_time 换算为 unix 秒；缺失/不可解析 = 0（由调用方决定如何处置）
+    pub created_time_secs: i64,
+    /// `type == "folder"`
+    pub is_dir: bool,
+}
+
+/// Drive `created_time` 解析：实测为**字符串秒**（样例 "1789888029"）；
+/// 同时接受 int；值 > 1e11 视为毫秒并换算 + warn（D30 毫秒护栏——单位口径若被
+/// 官方变更，护栏保证不会整体静默失灵）。缺失/不可解析返回 0。
+fn parse_created_time(v: Option<&Value>) -> i64 {
+    let Some(v) = v else { return 0 };
+    let raw: i64 = match v {
+        Value::String(s) => s.trim().parse().unwrap_or(0),
+        Value::Number(n) => n.as_i64().unwrap_or(0),
+        _ => 0,
+    };
+    if raw == 0 {
+        return 0;
+    }
+    // 秒级时间戳到 5138 年都在 1e11 以内；毫秒级现值约 1.79e12
+    if raw > 100_000_000_000 {
+        log::warn!("飞书 created_time 为毫秒值（样例 {raw}），已按毫秒换算为秒");
+        raw / 1000
+    } else {
+        raw
+    }
+}
+
 pub struct FeishuClient {
     app_id: String,
     app_secret: String,
@@ -192,9 +225,9 @@ impl FeishuClient {
             .ok_or_else(|| FeishuError { code: -1, msg: "root_folder/meta 缺少 token".into(), http_status: 0 })
     }
 
-    /// 列目录（page_size=50 翻页取全，20 次/秒）
-    pub fn list_folder(&self, folder_token: &str) -> Result<Vec<(String, String)>, FeishuError> {
-        // (token, name)
+    /// 列目录（page_size=50 翻页取全，20 次/秒）。
+    /// 每条带 `created_time`（unix 秒）与 `is_dir`（D30：月份目录识别需 type 过滤）。
+    pub fn list_folder(&self, folder_token: &str) -> Result<Vec<ListedFile>, FeishuError> {
         let mut out = Vec::new();
         let mut page_token = String::new();
         loop {
@@ -208,7 +241,12 @@ impl FeishuClient {
                     let t = f.get("token").and_then(Value::as_str).unwrap_or("").to_string();
                     let n = f.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                     if !t.is_empty() {
-                        out.push((t, n));
+                        out.push(ListedFile {
+                            token: t,
+                            name: n,
+                            created_time_secs: parse_created_time(f.get("created_time")),
+                            is_dir: f.get("type").and_then(Value::as_str) == Some("folder"),
+                        });
                     }
                 }
             }
@@ -242,14 +280,14 @@ impl FeishuClient {
         };
         // 根下找「青鸟传输」
         let files = self.list_folder(root)?;
-        let transfer = files.iter().find(|(_, n)| n == "青鸟传输").map(|(t, _)| t.clone());
+        let transfer = files.iter().find(|f| f.name == "青鸟传输").map(|f| f.token.clone());
         let transfer = match transfer {
             Some(t) => t,
             None => self.create_folder(root, "青鸟传输")?,
         };
         // 月份目录
         let sub = self.list_folder(&transfer)?;
-        match sub.iter().find(|(_, n)| n == &month).map(|(t, _)| t.clone()) {
+        match sub.iter().find(|f| f.name == month).map(|f| f.token.clone()) {
             Some(t) => Ok(t),
             None => self.create_folder(&transfer, &month),
         }
@@ -437,6 +475,26 @@ pub fn send_webhook_json(url: &str, payload: &Value, secret: Option<&str>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D30 毫秒护栏：实测为字符串秒；string/int 双接受；>1e11 视为毫秒换算
+    #[test]
+    fn parse_created_time_accepts_string_int_and_ms_guard() {
+        // 实测口径：字符串秒
+        assert_eq!(parse_created_time(Some(&serde_json::json!("1789888029"))), 1_789_888_029);
+        // int 同样接受
+        assert_eq!(parse_created_time(Some(&serde_json::json!(1_789_888_029))), 1_789_888_029);
+        // 毫秒护栏：>1e11 → 换算为秒
+        assert_eq!(parse_created_time(Some(&serde_json::json!(1_789_888_029_000i64))), 1_789_888_029);
+        assert_eq!(parse_created_time(Some(&serde_json::json!("1789888029000"))), 1_789_888_029);
+        // 毫秒护栏边界：1e11（含）以内不换算，超出换算
+        assert_eq!(parse_created_time(Some(&serde_json::json!(100_000_000_000i64))), 100_000_000_000);
+        assert_eq!(parse_created_time(Some(&serde_json::json!(100_000_000_001i64))), 100_000_000);
+        // 缺失 / 不可解析 → 0（由扫描端跳过，宁漏删勿误删）
+        assert_eq!(parse_created_time(None), 0);
+        assert_eq!(parse_created_time(Some(&serde_json::json!("abc"))), 0);
+        assert_eq!(parse_created_time(Some(&serde_json::json!(null))), 0);
+        assert_eq!(parse_created_time(Some(&serde_json::json!(0))), 0);
+    }
 
     #[test]
     fn webhook_sign_via_message_hmac_sign_matches_reference() {

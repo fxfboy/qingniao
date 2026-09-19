@@ -414,11 +414,12 @@ impl Engine {
 
         let host = self.host.clone();
         let quota = self.quota.clone();
+        let work_dir = self.work_dir.clone();
         let engine = self.clone();
         let task_id2 = task_id.clone();
         std::thread::Builder::new()
             .name(format!("qn-upload-{task_id}"))
-            .spawn(move || match upload_inner(host.as_ref(), &quota, &task_id2, &cancel, &req, &key, &app_id, &app_secret, size) {
+            .spawn(move || match upload_inner(host.as_ref(), &quota, &work_dir, &task_id2, &cancel, &req, &key, &app_id, &app_secret, size) {
                 Ok(link) => {
                     emit_progress(host.as_ref(), &task_id2, "out", "done", size, size, size, size, None, Some(&link), None);
                     engine.record_final(&task_id2, serde_json::json!({"state":"done","dir":"out","link":link}));
@@ -465,6 +466,7 @@ impl Engine {
         let link = upload_inner(
             self.host.as_ref(),
             &self.quota,
+            &self.work_dir,
             &task_id,
             &cancel,
             req,
@@ -1027,6 +1029,7 @@ fn hex_decode_16(s: &str) -> Result<Vec<u8>, String> {
 fn upload_inner(
     host: &dyn Host,
     quota: &Arc<Quota>,
+    work_dir: &std::path::Path,
     task_id: &str,
     cancel: &Arc<AtomicBool>,
     req: &UploadRequest,
@@ -1076,6 +1079,8 @@ fn upload_inner(
     }
 
     // 4. 组装 metadata + payload（§8.3）
+    // 登记点物料（D27）：全部 chunk token 在 meta 被移入 Envelope 前取出
+    let chunk_tokens: Vec<String> = chunk_metas.iter().map(|c| c.t.clone()).collect();
     let mut file2 = std::fs::File::open(&req.path).map_err(|e| format!("打开文件失败: {e}"))?;
     let sha256 = hex_sha256_stream(&mut file2)?;
     let display_name = std::path::Path::new(&req.path)
@@ -1099,19 +1104,59 @@ fn upload_inner(
         tid: crypto::hex(&tid),
         meta,
     };
-    let payload = seal_payload(key, &env)?;
+    let link = send_tail(host, req, key, &env, &display_name, total, sent_ts, &chunk_tokens)?;
 
-    // 5. 链接端口 = 配置端口（D23/M0c）：接收端据 configured_port 拨号，
-    //    与发送端本机服务的运行时状态无关；发送与接收完全解耦（2026-09-19 用户拍板：不告警不拒绝）
-    let link = build_transfer_link(host.configured_port(), &payload);
-
-    // 6. 仅链接形式发群（D3/D4）；webhook 不计入月度额度
-    let card = build_transfer_card(&display_name, total, &link, sent_ts);
-    let (status, body) = send_webhook_json(&req.webhook_url, &card, Some(&req.webhook_secret))?;
-    if !(200..300).contains(&status) {
-        return Err(format!("取回链接发送失败：HTTP {status} {body}"));
-    }
+    // 登记点（D27/P1-1，必须在 upload_inner——APP 线程路径与 CLI send_file_sync 的共用实现）：
+    // 发送成功 → 登记本次全部分片在链接窗口 + 宽限期后删除
+    crate::transfer::cleanup::schedule_deletes(
+        work_dir,
+        &chunk_tokens,
+        sent_ts + crypto::FRESHNESS_WINDOW_SECS + crate::transfer::cleanup::CLEANUP_GRACE_SECS,
+    );
     Ok(link)
+}
+
+/// upload_inner 的尾部（组装 payload → 链接 → 发卡片）。独立出来以便失败路径
+/// 统一记日志（D29）：分片已全部上传后任何一步失败（seal_payload、webhook 非
+/// 2xx、webhook 网络错误），已上传分片成为孤儿——不删、不登记，只 log::warn!
+/// 等待每周 48 h 扫描兜底。webhook 响应读超时但消息实际已发出的歧义情形同此。
+fn send_tail(
+    host: &dyn Host,
+    req: &UploadRequest,
+    key: &[u8],
+    env: &Envelope,
+    display_name: &str,
+    total: u64,
+    sent_ts: i64,
+    chunk_tokens: &[String],
+) -> Result<String, String> {
+    let result = (|| -> Result<String, String> {
+        let payload = seal_payload(key, env)?;
+
+        // 5. 链接端口 = 配置端口（D23/M0c）：接收端据 configured_port 拨号，
+        //    与发送端本机服务的运行时状态无关；发送与接收完全解耦（2026-09-19 用户拍板：不告警不拒绝）
+        let link = build_transfer_link(host.configured_port(), &payload);
+
+        // 6. 仅链接形式发群（D3/D4）；webhook 不计入月度额度
+        let card = build_transfer_card(display_name, total, &link, sent_ts);
+        let (status, body) = send_webhook_json(&req.webhook_url, &card, Some(&req.webhook_secret))?;
+        if !(200..300).contains(&status) {
+            return Err(format!("取回链接发送失败：HTTP {status} {body}"));
+        }
+        Ok(link)
+    })();
+    match result {
+        Ok(link) => Ok(link),
+        Err(e) => {
+            let prefix: String = chunk_tokens.first().map(|t| t.chars().take(8).collect()).unwrap_or_default();
+            log::warn!(
+                "发送失败，本次遗留 {} 片（{}…），等待定期清理",
+                chunk_tokens.len(),
+                prefix
+            );
+            Err(e)
+        }
+    }
 }
 
 /// 取回链接组装（D23：端口 = 配置值 configured_port，非本机运行时端口）

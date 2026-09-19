@@ -18,22 +18,78 @@ const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 /// 独占锁定状态文件（advisory），锁内重读磁盘内容并交调用方合并。
 /// 返回 (锁 guard, 磁盘内容——不存在或非法时为 `None`)。
 /// guard 存活期间锁有效；先落 guard 变量再使用内容，确保合并+写入全程持锁。
+///
+/// **inode 校验（为何锁上之后还要核对）**：[`atomic_write`] 用 rename 原子替换，
+/// 会把路径指向**新 inode**。排队等待者若在他人持锁期间 `open` 了旧 inode，
+/// 加锁成功后读到的是**陈旧内容**——跨进程的「锁内认领」会被重复执行
+/// （cleanup 方案 U23：同 token 只删一次，被并发测试实测击穿）。
+/// 因此锁上后核对 path 仍指向同一 inode，不一致则重开重试（限期内）。
 pub fn with_exclusive(
     path: &Path,
 ) -> Result<(StateFileLock, Option<serde_json::Value>), String> {
-    let mut f = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(path)
-        .map_err(|e| format!("打开状态文件失败 {}: {e}", path.display()))?;
-    acquire(&mut f, path)?;
-    let mut text = String::new();
-    // 重读发生在锁内（D24：另一进程的写入必须可见）
-    let _ = f.read_to_string(&mut text);
-    let value = serde_json::from_str::<serde_json::Value>(&text).ok();
-    Ok((StateFileLock(f), value))
+    let deadline = Instant::now() + LOCK_TIMEOUT;
+    loop {
+        let mut f = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(|e| format!("打开状态文件失败 {}: {e}", path.display()))?;
+        match f.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if Instant::now() >= deadline {
+                    return Err(format!("状态文件被其他进程占用: {}", path.display()));
+                }
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+            Err(std::fs::TryLockError::Error(e)) => {
+                return Err(format!("状态文件加锁失败 {}: {e}", path.display()))
+            }
+        }
+        if inode_of(&f) == inode_of_path(path) {
+            let mut text = String::new();
+            // 重读发生在锁内（D24：另一进程的写入必须可见）
+            let _ = f.read_to_string(&mut text);
+            let value = serde_json::from_str::<serde_json::Value>(&text).ok();
+            return Ok((StateFileLock(f), value));
+        }
+        // 路径已被 rename 换成新 inode：释放旧锁，重开重试
+        if Instant::now() >= deadline {
+            return Err(format!("状态文件在锁等待期间被替换: {}", path.display()));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// 文件句柄的 inode（非 unix 恒 0：校验退化为永真，保持既有行为）
+fn inode_of(f: &File) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        f.metadata().map(|m| m.ino()).unwrap_or(0)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = f;
+        0
+    }
+}
+
+/// 路径当前指向的 inode（路径不存在时返回一个必不匹配的哨兵值）
+fn inode_of_path(path: &Path) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(path).map(|m| m.ino()).unwrap_or(u64::MAX)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        0
+    }
 }
 
 /// 原子写：pid 后缀临时文件 → fsync → rename（0600，unix）。
@@ -73,23 +129,6 @@ where
     atomic_write(path, &v)?;
     drop(guard);
     Ok(())
-}
-
-fn acquire(f: &mut File, path: &Path) -> Result<(), String> {
-    let deadline = Instant::now() + LOCK_TIMEOUT;
-    loop {
-        match f.try_lock() {
-            Ok(()) => return Ok(()),
-            Err(std::fs::TryLockError::WouldBlock) => {}
-            Err(std::fs::TryLockError::Error(e)) => {
-                return Err(format!("状态文件加锁失败 {}: {e}", path.display()))
-            }
-        }
-        if Instant::now() >= deadline {
-            return Err(format!("状态文件被其他进程占用: {}", path.display()));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 /// 状态文件锁 guard（drop 即释放）
