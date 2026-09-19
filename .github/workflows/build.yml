@@ -114,8 +114,8 @@ jobs:
           STAGE=$(mktemp -d)
           cp target/aarch64-apple-darwin/release/qingniao-cli "$STAGE/qingniao"
           "$STAGE/qingniao" --version
-          (cd "$STAGE" && zip -q "$GITHUB_WORKSPACE/qingniao-${VERSION}-macos-arm64.zip" qingniao)
-          gh release upload "${{ github.ref_name }}" "qingniao-${VERSION}-macos-arm64.zip" --clobber
+          (cd "$STAGE" && zip -q "$GITHUB_WORKSPACE/qingniao-cli-${VERSION}-macos-arm64.zip" qingniao)
+          gh release upload "${{ github.ref_name }}" "qingniao-cli-${VERSION}-macos-arm64.zip" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -158,7 +158,7 @@ jobs:
         run: |
           $v = "${{ needs.check-version.outputs.version }}"
           Compress-Archive -Path target\release\qingniao.exe, target\release\qingniao-cli.exe -DestinationPath "QingNiao_${v}_windows-x64.zip"
-          Compress-Archive -Path target\release\qingniao-cli.exe -DestinationPath "qingniao-${v}-windows-x64.zip"
+          Compress-Archive -Path target\release\qingniao-cli.exe -DestinationPath "qingniao-cli-${v}-windows-x64.zip"
           Get-Item *.zip | Select-Object Name, Length
 
       - name: 上传 zip 到 Release
@@ -167,4 +167,4 @@ jobs:
         run: |
           $v = "${{ needs.check-version.outputs.version }}"
           gh release upload "${{ github.ref_name }}" "QingNiao_${v}_windows-x64.zip" --clobber
-          gh release upload "${{ github.ref_name }}" "qingniao-${v}-windows-x64.zip" --clobber
+          gh release upload "${{ github.ref_name }}" "qingniao-cli-${v}-windows-x64.zip" --clobber

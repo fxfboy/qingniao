@@ -75,8 +75,8 @@ npm test              # 前端 golden 基线校验
 |---|---|
 | `QingNiao_x.y.z_aarch64.dmg` | macOS（Apple Silicon）安装包，已内嵌 CLI |
 | `QingNiao_x.y.z_windows-x64.zip` | Windows 便携版（APP + CLI，解压即用） |
-| `qingniao-x.y.z-macos-arm64.zip` | 独立 CLI（macOS arm64） |
-| `qingniao-x.y.z-windows-x64.zip` | 独立 CLI（Windows x64） |
+| `qingniao-cli-x.y.z-macos-arm64.zip` | 独立 CLI（macOS arm64） |
+| `qingniao-cli-x.y.z-windows-x64.zip` | 独立 CLI（Windows x64） |
 
 ### 本地构建 Windows 安装程序
 
@@ -125,7 +125,7 @@ CI 默认只出 Windows 便携 zip。如需生成 `.msi` / `.exe` 安装程序�
 让 AI Agent 通过命令行发送消息、传文件，与 APP 共用同一套核心（行为逐字一致）：
 
 - **安装**：APP「配置 → Agent」一键安装（macOS 符号链接到 `~/.local/bin/qingniao`，Windows 复制到
-  `%LOCALAPPDATA%\qingniao\bin\`）；或在 Release 下载 `qingniao-<版本>-<平台>.zip`，
+  `%LOCALAPPDATA%\qingniao\bin\`）；或在 Release 下载 `qingniao-cli-<版本>-<平台>.zip`，
   解压后把 `qingniao` 放进 PATH
 - **技能**：APP「配置 → Agent」一键托管同步到 `~/.agents/skills`、`~/.claude/skills`、`~/.codex/skills`；
   或由 Agent 自行执行 `npx skills add fxfboy/qingniao`
