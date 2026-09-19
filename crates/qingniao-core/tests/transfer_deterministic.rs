@@ -6,9 +6,9 @@
 //! 期望值全部是**重构前的实测取值**，不是推导值——取错就失去冻结的意义。
 //! 变更这些期望值前先问：这是有意的行为变更吗？若是，须走协议/方案修订并说明原因。
 
-use qingniao_lib::transfer::crypto as c;
-use qingniao_lib::transfer::engine::extract_payload;
-use qingniao_lib::transfer::feishu::webhook_sign;
+use qingniao_core::transfer::crypto as c;
+use qingniao_core::transfer::engine::extract_payload;
+use qingniao_core::transfer::feishu::webhook_sign;
 
 /* ===================== webhook 签名 ===================== */
 

@@ -9,7 +9,7 @@
 //! - 退出门闩（对齐 dock-tray A19）：stop_accepting 后新请求一律 503
 
 use crate::service::{LocalServiceController, LocalServiceStatus, ServiceStatusProvider, StatusCell};
-use crate::transfer::engine::{ClaimError, Engine};
+use qingniao_core::transfer::engine::{ClaimError, Engine};
 use std::io::Read;
 use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -241,7 +241,7 @@ fn handle_get_dl(ctx: &Ctx, request: tiny_http::Request, url: &str) {
         ("{{TTL_TEXT}}", String::new()),
         ("{{TTL_SECS}}", "0".into()),
         // 链接有效期文案（与「链接 N 分钟内有效」「剩余有效期」倒计时同一常量）
-        ("{{FRESH_WINDOW}}", format!("{} 分钟", crate::transfer::crypto::FRESHNESS_WINDOW_MINUTES)),
+        ("{{FRESH_WINDOW}}", format!("{} 分钟", qingniao_core::transfer::crypto::FRESHNESS_WINDOW_MINUTES)),
         ("{{HANDLE}}", String::new()),
         ("{{DIR}}", String::new()),
         ("{{FINAL_PATH}}", String::new()),
@@ -266,7 +266,7 @@ fn handle_get_dl(ctx: &Ctx, request: tiny_http::Request, url: &str) {
             match ctx.engine.create_session(&payload, ev) {
                 Ok(sess) => {
                     // 倒计时 = 链接剩余有效期（payload.ts + 30 min），与群消息/历史文案同源
-                    let ttl = (sess.expires_at - crate::transfer::crypto::now_unix()).max(0);
+                    let ttl = (sess.expires_at - qingniao_core::transfer::crypto::now_unix()).max(0);
                     state = "pending".into();
                     set_var(&mut vars, "{{NAME}}", html_escape(&sess.name));
                     set_var(&mut vars, "{{SIZE_HUMAN}}", human_size(sess.size));
@@ -350,7 +350,7 @@ fn handle_post_confirm(ctx: &Ctx, mut request: tiny_http::Request) {
 
     // 校验顺序 ③：handle 存在、未过期 → 原子标记「消费中」→ 执行下载 + 删除
     match ctx.engine.claim_session(&handle) {
-        Ok(crate::transfer::engine::ClaimResult::AlreadyDone { path }) => {
+        Ok(qingniao_core::transfer::engine::ClaimResult::AlreadyDone { path }) => {
             // 幂等：已完成 → 200 + 结果摘要，不重复下载/删除（§9.4）
             respond_json(request, 200, &serde_json::json!({
                 "code": 0,
@@ -358,7 +358,7 @@ fn handle_post_confirm(ctx: &Ctx, mut request: tiny_http::Request) {
                 "final_path": path,
             }));
         }
-        Ok(crate::transfer::engine::ClaimResult::Start(pending)) => {
+        Ok(qingniao_core::transfer::engine::ClaimResult::Start(pending)) => {
             match ctx.engine.run_download_sync(&pending) {
                 Ok(final_path) => {
                     respond_json(request, 200, &serde_json::json!({

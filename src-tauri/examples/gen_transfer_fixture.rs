@@ -104,6 +104,16 @@ fn main() {
         .join("golden")
         .join("transfer-interop.json");
     std::fs::create_dir_all(path.parent().expect("有父目录")).expect("建目录失败");
+    // 防误覆盖：冻结样本一旦入库就是重构的对照物，重新生成必须显式确认
+    if path.exists() && !std::env::args().any(|a| a == "--force") {
+        eprintln!(
+            "拒绝覆盖已存在的冻结样本：{}\n\
+             该样本是 M0a「行为零变更」的对照物，重新生成会使其失去意义。\n\
+             确需重新生成（例如协议正式变更后）请显式加 --force，并在提交信息里说明原因。",
+            path.display()
+        );
+        std::process::exit(1);
+    }
     std::fs::write(&path, serde_json::to_string_pretty(&doc).expect("序列化失败") + "\n")
         .expect("写 fixture 失败");
 

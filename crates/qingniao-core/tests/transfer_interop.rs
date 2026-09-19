@@ -10,11 +10,12 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
 use base64::Engine as _;
-use qingniao_lib::transfer::crypto::{self, Envelope};
+use qingniao_core::transfer::crypto::{self, Envelope};
 use serde_json::Value;
 
 fn fixture() -> Value {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
         .join("..")
         .join("tests")
         .join("golden")
