@@ -26,6 +26,8 @@ docs
 
 .claude
 .codebuddy
+.vscode
+.mimocode
 
 # 备份文件
 *.bak

@@ -1087,30 +1087,131 @@
   .toast.err .tdot{background: var(--danger)}
   .toast code{font-family: var(--font-mono); font-size:11.5px; color: var(--muted)}
 
-  .pop-wrap{position:relative; display:inline-flex}
-  .popover{
-    position:absolute; top: calc(100% + 8px); right: 0;
-    width: 344px;
-    background: var(--surface);
-    border:1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: 0 14px 36px oklch(0.15 0.02 240 / 0.16);
-    padding: 14px; z-index: 95; display:none;
+  /* ============ 取回文件 · 浏览器式弹窗 ============
+     地址栏本身就是输入框；视口里渲染的就是本机服务真实会返回的取回页
+     （transfer-confirm.html 那几屏）。下载任务跑在聊天记录里，视口只是它的显示器。 */
+  .rv-shell{display:grid; grid-template-rows: auto minmax(0,1fr); min-height:0; overflow:hidden}
+
+  .rv-chrome{
+    display:flex; align-items:center; gap:8px;
+    padding: 9px 12px; background: var(--surface-soft);
+    border-bottom:1px solid var(--border);
   }
-  .popover.show{display:block; animation: fadeIn .12s ease}
-  .popover label{display:block; font-size:11.5px; color: var(--muted); margin-bottom:6px}
-  .popover .prow{display:flex; gap:6px}
-  .popover input{
-    flex:1; min-width:0; padding: 8px 10px;
-    border:1px solid var(--border); border-radius:8px;
-    background: var(--surface); font-family: var(--font-mono); font-size:11.5px;
-    color: var(--fg); outline:none;
+  .rv-url{
+    flex:1 1 0; min-width:0; height:34px;
+    display:flex; align-items:center; gap:8px; padding: 0 11px;
+    border:1px solid var(--border); border-radius:9px; background: var(--surface);
+    transition: border-color .12s ease, box-shadow .12s ease;
   }
-  .popover input:focus{border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2)}
-  .popover .pgo{flex:none; padding: 0 12px; border-radius:8px; font-size:12px; border:1px solid var(--border); background: var(--surface-soft); color: var(--fg)}
-  .popover .pgo:hover{border-color: var(--border-strong)}
-  .popover .phint{margin: 8px 0 0; font-size:11px; color: var(--muted); line-height:1.65}
-  .popover .phint.bad{color: var(--danger)}
+  .rv-url:focus-within{border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2)}
+  .rv-url svg{width:13px; height:13px; flex:none; color: var(--muted)}
+  .rv-url input{
+    flex:1 1 0; min-width:0; padding:0; border:none; outline:none; background:none;
+    font-family: var(--font-mono); font-size:11.5px; color: var(--fg);
+  }
+  .rv-url input::placeholder{color: var(--muted)}
+  .rv-url input:disabled{color: var(--muted)}
+  .rv-go{
+    flex:none; height:34px; padding: 0 15px; border-radius:9px; font-size:12.5px;
+    border:1px solid var(--border); background: var(--surface); color: var(--fg);
+    transition: border-color .1s ease, background .1s ease;
+  }
+  .rv-go:hover:not(:disabled){border-color: var(--border-strong); background: var(--surface-soft)}
+  .rv-go:disabled{opacity:.5; cursor:default}
+
+  /* 视口按内容长高，只在上限处收住 —— 取回页整屏放得下，正常窗口不出现滚动条。
+     178px = 弹窗上下边框 2 + 头部 60 + 地址栏 55 + 页脚 61（截图实测），减掉它才是视口能用的高度。 */
+  .rv-modal{width: 720px; max-height: 90vh}
+  .rv-viewport{
+    display:flex; flex-direction:column;
+    min-height: min(420px, calc(90vh - 178px));
+    max-height: min(560px, calc(90vh - 178px));
+    overflow-y:auto;
+    background-color: var(--bg);
+    background-image: radial-gradient(120% 90% at 50% -10%, var(--accent-soft) 0%, transparent 58%);
+  }
+  .rv-screen{display:none}
+  /* 空态 / 错误态 / 取回页共用视口高度：弹窗在打开前后不跳高度 */
+  .rv-screen.on{display:flex; flex-direction:column; flex:1 0 auto}
+
+  /* 空态 / 错误态：视口里的“空白页” */
+  .rv-ph{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:7px; padding: 40px 36px; text-align:center;
+  }
+  .rv-ph-ico{
+    width:40px; height:40px; border-radius:50%; display:grid; place-items:center; margin-bottom:3px;
+    background: var(--accent-soft); color: var(--accent-ink);
+  }
+  .rv-ph-ico svg{width:18px; height:18px}
+  .rv-ph b{font-size:14px; font-weight:600; color: var(--fg)}
+  .rv-ph span{max-width:420px; font-size:12.5px; line-height:1.75; color: var(--muted)}
+  .rv-ph code{
+    font-family: var(--font-mono); font-size:11.5px; color: var(--fg);
+    background: var(--surface); border:1px solid var(--border); border-radius:5px; padding:1px 6px;
+  }
+  .rv-ph.bad .rv-ph-ico{background: oklch(0.96 0.045 25); color: oklch(0.5 0.18 25)}
+  .rv-ph.bad b{color: oklch(0.45 0.17 25)}
+
+  /* 取回页：与 transfer-confirm.html 同一套排版，尺寸收进弹窗视口。
+     弹窗里不放品牌条 —— 标题、地址栏、页脚已经在交代「这是青鸟的本机取回页」，
+     再叠一行「青鸟 · 127.0.0.1:9876」就是第四遍。 */
+  .rv-page{flex:1 0 auto; display:flex; flex-direction:column; align-items:center; padding: 22px 22px 20px}
+  .rv-card{
+    width:100%; max-width:520px; padding: 20px 22px 18px;
+    background: var(--surface); border:1px solid var(--border);
+    border-radius:14px; box-shadow: var(--shadow-md);
+  }
+  .rv-stage{display:none}
+  .rv-stage.on{display:block}
+  .rv-card h1{margin:0 0 6px; font-size:17.5px; font-weight:600; letter-spacing:.2px}
+  .rv-lede{margin:0; font-size:13px; line-height:1.72; color: var(--muted)}
+  .rv-lede code{font-family: var(--font-mono); font-size:12px; color: var(--fg); background: var(--surface-soft); border-radius:4px; padding:1px 5px}
+
+  .rv-file{
+    display:grid; grid-template-columns: auto minmax(0,1fr); gap:12px; align-items:center;
+    margin-top:14px; padding: 11px; border:1px solid var(--border); border-radius:12px; background: var(--surface-soft);
+  }
+  .rv-file .fico{width:36px; height:36px; border-radius:10px; display:grid; place-items:center; background: var(--surface); border:1px solid var(--border); color: var(--muted)}
+  .rv-file .fico svg{width:17px; height:17px}
+  .rv-file b{display:block; font-size:13.5px; font-weight:500; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  .rv-file .m{display:flex; flex-wrap:wrap; gap:2px 10px; margin-top:3px; font-family: var(--font-mono); font-size:11px; color: var(--muted)}
+
+  .rv-kv{display:grid; gap:1px; margin-top:12px; background: var(--border); border:1px solid var(--border); border-radius:11px; overflow:hidden}
+  .rv-kv .row{display:flex; align-items:center; gap:12px; padding: 8px 13px; background: var(--surface); font-size:12.5px}
+  .rv-kv .k{flex:none; width:84px; color: var(--muted)}
+  .rv-kv .v{flex:1 1 0; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  .rv-kv .v.mono{font-family: var(--font-mono); font-size:12px}
+  .rv-kv .v.hot{color: var(--accent-ink); font-variant-numeric: tabular-nums}
+
+  .rv-note{
+    display:flex; align-items:flex-start; gap:9px; margin-top:12px; padding: 9px 12px; border-radius:11px;
+    font-size:12px; line-height:1.7;
+    border:1px solid var(--accent-soft-2); background: var(--accent-soft); color: var(--accent-ink);
+  }
+  .rv-note svg{width:14px; height:14px; flex:none; margin-top:3px}
+
+  .rv-acts{display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap}
+  .rv-acts .tail{margin-left:auto; font-size:11px; color: var(--muted)}
+  .rv-btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding: 11px 18px; border-radius:11px; font-size:14px; font-weight:600;
+    background: var(--accent-fill); color: white; box-shadow: 0 4px 14px oklch(0.6 0.1 175 / 0.26);
+    transition: background .12s ease, transform .08s ease;
+  }
+  .rv-btn:hover{background: var(--accent-fill-hover)}
+  .rv-btn:active{transform: translateY(1px)}
+  .rv-btn svg{width:15px; height:15px}
+
+  /* 这一页不显示进度、也不逐步汇报「下载 / 校验 / 写入」——
+     进度只活在消息记录里，取回页点完就只剩一句「已开始下载」。 */
+
+  .rv-path{
+    display:flex; align-items:center; gap:9px; margin-top:14px; padding: 10px 12px;
+    border:1px solid var(--border); border-radius:11px; background: var(--surface-soft);
+  }
+  .rv-path svg{width:14px; height:14px; flex:none; color: var(--muted)}
+  .rv-path code{flex:1 1 0; min-width:0; font-family: var(--font-mono); font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
 
   .dropzone{
     position: fixed; inset: 0; z-index: 140;
@@ -1180,7 +1281,6 @@
   html[data-theme="dark"] .dropzone{background: oklch(0 0 0 / 0.55)}
   html[data-theme="dark"] .bot-menu,
   html[data-theme="dark"] .add-menu,
-  html[data-theme="dark"] .popover,
   html[data-theme="dark"] .expand-sheet,
   html[data-theme="dark"] .modal,
   html[data-theme="dark"] .toast{box-shadow: 0 24px 64px oklch(0 0 0 / 0.55), 0 2px 8px oklch(0 0 0 / 0.35)}
@@ -1200,6 +1300,8 @@
   html[data-theme="dark"] .sc-issue .issue-head{color: oklch(0.94 0.12 75)}
   html[data-theme="dark"] .sc-issue p{color: oklch(0.82 0.09 75)}
   html[data-theme="dark"] .sc-issue code{background: oklch(0 0 0 / 0.3); border-color: oklch(0.46 0.1 75); color: oklch(0.94 0.12 75)}
+  html[data-theme="dark"] .rv-ph.bad .rv-ph-ico{background: oklch(0.29 0.075 25); color: oklch(0.86 0.14 25)}
+  html[data-theme="dark"] .rv-ph.bad b{color: oklch(0.88 0.13 25)}
   html[data-theme="dark"] .agent-status{background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
   html[data-theme="dark"] .bot-list-item .meta .tag.ok{background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
   html[data-theme="dark"] .bot-list-item .meta .tag.warn{background: oklch(0.32 0.08 75); color: oklch(0.9 0.12 75)}
@@ -1256,7 +1358,17 @@
     .filecard{max-width:100%}
     .bot-menu{min-width: 0; right:0; left:auto; width: min(320px, calc(100vw - 28px))}
     .add-menu{width: min(288px, calc(100vw - 28px))}
-    .popover{width: min(344px, calc(100vw - 28px))}
+    .rv-modal{width: calc(100vw - 28px)}
+    .rv-modal > footer{flex-wrap:wrap; row-gap:6px}
+    .rv-viewport{
+      min-height: min(320px, calc(90vh - 178px));
+      max-height: min(560px, calc(90vh - 178px));
+    }
+    .rv-ph{padding: 30px 20px}
+    .rv-page{padding: 18px 14px 20px}
+    .rv-card{padding: 18px 16px 16px}
+    .rv-acts .tail{margin-left:0}
+    .rv-url input{font-size:11px}
     .modal .body{grid-template-columns: minmax(0,1fr)}
     .modal .body .nav{flex-direction:row; overflow-x:auto; border-right:none; border-bottom:1px solid var(--border)}
     .modal .body .nav .group-title{display:none}
@@ -1347,20 +1459,10 @@
         <span class="s up"><i></i><span id="statUp">发出 6</span></span>
         <span class="s down"><i></i><span id="statDown">接收 3</span></span>
       </div>
-      <div class="pop-wrap">
-        <button class="chat-act" id="retrieveBtn" data-od-id="retrieve-btn" aria-expanded="false" aria-controls="retrievePop" title="粘贴群里的取回链接">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/><path d="M4 3h16"/></svg>
-          取回文件
-        </button>
-        <div class="popover" id="retrievePop" role="dialog" aria-label="取回文件">
-          <label for="retrieveInput">下载链接或加密载荷</label>
-          <div class="prow">
-            <input type="text" id="retrieveInput" spellcheck="false" placeholder="http://127.0.0.1:9876/dl?t=…" />
-            <button class="pgo" id="retrieveGo">解析</button>
-          </div>
-          <p class="phint" id="retrieveHint">群消息里的链接点不开时，把整条链接粘进来一样能取回文件。解析后会作为一条记录出现在下方。</p>
-        </div>
-      </div>
+      <button class="chat-act" id="retrieveBtn" data-od-id="retrieve-btn" aria-haspopup="dialog" title="粘贴群里的取回链接">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/><path d="M4 3h16"/></svg>
+        取回文件
+      </button>
       <button class="chat-act danger" id="clearBtn" data-od-id="clear-history" title="清空消息记录">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
         清空记录
@@ -1545,7 +1647,7 @@
                   </div>
                 </div>
                 <div class="fc-bot">
-                  <span class="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>已解密并保存到下载目录</span>
+                  <span class="st"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>已保存到下载目录</span>
                   <span class="bacts"><button data-open-dir>打开目录</button></span>
                 </div>
               </div>
@@ -1910,6 +2012,111 @@
       <div class="spacer"></div>
       <button class="btn-secondary" id="confirmCancel">取消</button>
       <button class="btn-primary" id="confirmSend">发送</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 取回文件：地址栏就是输入框，视口渲染本机服务真实会返回的取回页 -->
+<div class="overlay" id="retrieveOverlay" data-od-id="retrieve-overlay" role="dialog" aria-modal="true" aria-labelledby="retrieveTitle">
+  <div class="modal rv-modal" role="document">
+    <header>
+      <div class="m-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/><path d="M4 3h16"/></svg>
+        <h2 id="retrieveTitle">取回文件</h2>
+      </div>
+      <button class="close" id="rvClose" aria-label="关闭">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+
+    <div class="rv-shell">
+      <div class="rv-chrome">
+        <div class="rv-url">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <input type="text" id="rvInput" spellcheck="false" autocomplete="off" aria-label="下载链接或取回码" placeholder="http://127.0.0.1:9876/dl?t=…" />
+        </div>
+        <button class="rv-go" id="rvGo">打开取回页</button>
+      </div>
+
+      <div class="rv-viewport" id="rvViewport">
+        <!-- 空白页 -->
+        <div class="rv-screen on" data-screen="empty">
+          <div class="rv-ph">
+            <span class="rv-ph-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M4 19h16"/></svg>
+            </span>
+            <b>把取回链接粘到地址栏</b>
+            <span>群里的链接在这台机器上点不开时，把整条链接粘进来，青鸟会用本机服务把取回页打开；也可以只粘 <code>t=</code> 后面那段取回码。</span>
+          </div>
+        </div>
+
+        <!-- 打不开：像浏览器一样给一张错误页，而不是弹一条提示 -->
+        <div class="rv-screen" data-screen="error">
+          <div class="rv-ph bad">
+            <span class="rv-ph-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.01"/></svg>
+            </span>
+            <b id="rvErrTitle">无法打开这个地址</b>
+            <span id="rvErrMsg">把群里那条取回链接整条粘进来，或只粘 t= 后面那段取回码。</span>
+            <code>http://127.0.0.1:9876/dl?t=…</code>
+          </div>
+        </div>
+
+        <!-- 取回页 -->
+        <div class="rv-screen" data-screen="page">
+          <div class="rv-page">
+            <main class="rv-card">
+              <section class="rv-stage on" data-stage="pending" aria-labelledby="rvH1">
+                <h1 id="rvH1">有一个文件等你取回</h1>
+                <p class="rv-lede">这是从另一台机器发过来的文件，全程端到端加密，飞书那边只有密文。</p>
+                <div class="rv-file">
+                  <div class="fico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
+                  </div>
+                  <div>
+                    <b id="rvFileName" title="项目周会纪要-0916.docx">项目周会纪要-0916.docx</b>
+                    <div class="m"><span id="rvFileSize">1.2 MB</span><span>DOCX</span></div>
+                  </div>
+                </div>
+                <div class="rv-kv">
+                  <div class="row"><span class="k">发送时间</span><span class="v">今天 16:02</span></div>
+                  <div class="row"><span class="k">剩余有效期</span><span class="v mono hot" id="rvTtl">7:41</span></div>
+                  <div class="row"><span class="k">保存到</span><span class="v mono">/Users/fuxinfeng/Downloads</span></div>
+                </div>
+                <div class="rv-acts">
+                  <button class="rv-btn" id="rvStart">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 10.5L12 15l4.5-4.5"/><path d="M4 19h16"/></svg>
+                    开始下载
+                  </button>
+                  <span class="tail">按下才会真正下载</span>
+                </div>
+                <div class="rv-note">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  <span>打开这个页面不会产生任何动作 —— 浏览器预取、飞书链接预览、杀毒软件扫描都碰不到你的文件。只有你按下按钮，青鸟才会真正开始下载。</span>
+                </div>
+              </section>
+
+              <section class="rv-stage" data-stage="started" aria-labelledby="rvH2">
+                <h1 id="rvH2">已开始下载</h1>
+                <p class="rv-lede">进度在青鸟的消息记录里，这个页面可以关掉了。</p>
+                <div class="rv-path">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                  <code id="rvPath" title="/Users/fuxinfeng/Downloads/项目周会纪要-0916.docx">/Users/fuxinfeng/Downloads/项目周会纪要-0916.docx</code>
+                </div>
+              </section>
+            </main>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div class="left">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        取回页由本机服务渲染，链接 10 分钟内有效
+      </div>
+      <div class="spacer"></div>
+      <button class="btn-secondary" id="rvCloseBtn">关闭</button>
     </footer>
   </div>
 </div>
@@ -2781,12 +2988,13 @@
       '</div>' +
       '<div class="fc-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i style="width:0%"></i></div>' +
       '<div class="fc-bot"><span class="st" data-st>' +
-        (dir === 'in' ? '解密中，完成后直接存到「下载」目录' : '本机加密后上传，飞书侧只有密文') +
+        (dir === 'in' ? '完成后直接存到「下载」目录' : '本机加密后上传，飞书侧只有密文') +
       '</span><span class="bacts"><button data-cancel>取消</button></span></div>' +
     '</div>';
   }
 
-  function runTransfer(card, name, dir){
+  /* hooks 可选：done/stop/retry。取回页不再显示进度，只在取消/重试时借用它复位。 */
+  function runTransfer(card, name, dir, hooks){
     var pct = 0;
     var bar = $('.fc-bar', card), fill = $('.fc-bar i', card);
     var rate = $('[data-rate]', card), pctEl = $('[data-pct]', card), st = $('[data-st]', card);
@@ -2813,26 +3021,28 @@
       var x = $('[data-cancel][title]', card);
       if (x) x.style.display = 'none';
       refreshStats();
+      if (hooks && hooks.stop) hooks.stop();
     }
     function finish(){
       card.classList.add('done');
       card.classList.remove('fail');
       var x = $('[data-cancel][title]', card);
       if (x) x.style.display = 'none';
-      st.innerHTML = OK_ICO + (dir === 'in' ? '已解密并保存到「下载」目录' : '取回链接已发到 ' + esc(botName()) + ' · 10 分钟内有效');
+      st.innerHTML = OK_ICO + (dir === 'in' ? '已保存到「下载」目录' : '取回链接已发到 ' + esc(botName()) + ' · 10 分钟内有效');
       $('.bacts', card).innerHTML = dir === 'in'
         ? '<button data-open-dir>打开目录</button>'
         : '<button class="hi" data-copy-link>复制链接</button>';
       $('.fmeta', card).innerHTML = '<span>' + fmtSize(name.size || 0) + '</span>';
       refreshStats();
       if (dir === 'out') toast('文件已发出', '取回链接已发到 ' + botName());
+      if (hooks && hooks.done) hooks.done();
     }
     card.addEventListener('click', function(e){
       var b = e.target.closest('button');
       if (!b) return;
       e.stopPropagation();            /* 由卡片自己处理，避免外层委托重复响应 */
       if (b.hasAttribute('data-cancel')){ stop(); }
-      else if (b.hasAttribute('data-retry')){ pickFile(); }
+      else if (b.hasAttribute('data-retry')){ (hooks && hooks.retry) ? hooks.retry() : pickFile(); }
       else if (b.hasAttribute('data-open-dir')){ toast('已打开下载目录'); }
       else if (b.hasAttribute('data-copy-link')){
         b.textContent = '已复制';
@@ -2918,7 +3128,7 @@
     function doneDn(){
       dnTask.classList.add('done');
       $('#dnCancel').style.display = 'none';
-      $('.fc-bot .st', dnTask).innerHTML = OK_ICO + '已解密并保存到「下载」目录';
+      $('.fc-bot .st', dnTask).innerHTML = OK_ICO + '已保存到「下载」目录';
       $('.bacts', dnTask).innerHTML = '<button data-open-dir>打开目录</button>';
       refreshStats();
       toast('招标文件-终稿.zip 已保存', '下载目录');
@@ -3013,59 +3223,139 @@
     clearBtn.innerHTML = clearBtn.innerHTML.replace('再点一次确认', '清空记录');
   }
 
-  /* ================= 取回链接 ================= */
-  var retrieveBtn = $('#retrieveBtn'), retrievePop = $('#retrievePop');
-  retrieveBtn.addEventListener('click', function(e){
-    e.stopPropagation();
-    var show = !retrievePop.classList.contains('show');
-    retrievePop.classList.toggle('show', show);
-    retrieveBtn.setAttribute('aria-expanded', String(show));
-    if (show) $('#retrieveInput').focus();
-  });
-  retrievePop.addEventListener('click', function(e){ e.stopPropagation(); });
+  /* ================= 取回文件：浏览器式弹窗 =================
+     视口里渲染的取回页，就是本机服务真实会返回的那一页；
+     下载只跑一次：聊天记录是任务的宿主，取回页只是它的显示器。 */
+  var retrieveBtn = $('#retrieveBtn'), rvOverlay = $('#retrieveOverlay');
+  var rvInput = $('#rvInput'), rvViewport = $('#rvViewport');
+  var rvScreens = $$('.rv-screen', rvOverlay), rvStages = $$('.rv-stage', rvOverlay);
+  var rvFile = { name:'项目周会纪要-0916.docx', size: 1.2 * 1048576, from:'付新峰' };
+  var rvTtlTimer = null, rvTtlLeft = 7 * 60 + 41;
+
+  function rvScreen(name){
+    rvScreens.forEach(function(s){ s.classList.toggle('on', s.getAttribute('data-screen') === name); });
+  }
+  function rvStage(name){
+    rvStages.forEach(function(s){ s.classList.toggle('on', s.getAttribute('data-stage') === name); });
+    rvViewport.scrollTop = 0;              /* 直接改 scrollTop，不用 scrollIntoView */
+  }
+  function rvLock(on){
+    rvInput.disabled = on;
+    $('#rvGo').disabled = on;
+  }
+  function rvHost(){
+    var el = $('#portInput');
+    var port = ((el && el.value) || '9876').trim() || '9876';
+    return '127.0.0.1:' + port;
+  }
+  function rvPaintTtl(){
+    var m = Math.floor(rvTtlLeft / 60), s = rvTtlLeft % 60;
+    $('#rvTtl').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+  }
+  function rvRunTtl(){
+    clearInterval(rvTtlTimer);
+    rvTtlLeft = 7 * 60 + 41;
+    rvPaintTtl();
+    rvTtlTimer = setInterval(function(){
+      if (rvTtlLeft <= 0){ clearInterval(rvTtlTimer); return; }
+      rvTtlLeft--;
+      rvPaintTtl();
+      if (rvTtlLeft === 0){
+        clearInterval(rvTtlTimer);
+        rvFail('链接已经过期', '这条链接超出了 10 分钟的新鲜度窗口。请让对方在青鸟里重新发一次这个文件。');
+      }
+    }, 1000);
+  }
+  function rvFail(title, msg){
+    $('#rvErrTitle').textContent = title;
+    $('#rvErrMsg').textContent = msg;
+    rvScreen('error');
+    rvInput.focus();
+    rvInput.select();
+  }
+  function rvOpen(){
+    var v = (rvInput.value || '').trim();
+    if (!v){ rvFail('地址栏是空的', '把群里那条取回链接整条粘进来，或只粘 t= 后面那段取回码。'); return; }
+    var url = /^https?:\/\/127\.0\.0\.1:\d+\/dl\?t=.+/.test(v)
+      ? v
+      : (/^[A-Za-z0-9_-]{24,}$/.test(v) ? 'http://' + rvHost() + '/dl?t=' + v : '');
+    if (!url){
+      rvFail('这不像青鸟的取回链接', '取回链接形如 http://127.0.0.1:9876/dl?t=… ，或者 t= 后面那段 24 位以上的取回码。');
+      return;
+    }
+    rvInput.value = url;
+    $('#rvPath').textContent = '/Users/fuxinfeng/Downloads/' + rvFile.name;
+    $('#rvPath').setAttribute('title', $('#rvPath').textContent);
+    rvScreen('page');
+    rvStage('pending');
+    rvRunTtl();
+    $('#rvStart').focus();
+  }
+  function openRetrieve(){
+    openOverlay(rvOverlay);
+    rvInput.focus();
+    if (rvInput.value) rvInput.select();
+  }
+  function closeRetrieve(){
+    closeOverlay(rvOverlay);
+    retrieveBtn.focus();
+  }
+  retrieveBtn.addEventListener('click', openRetrieve);
+  $('#rvGo').addEventListener('click', rvOpen);
+  $('#rvInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') rvOpen(); });
+  $('#rvClose').addEventListener('click', closeRetrieve);
+  $('#rvCloseBtn').addEventListener('click', closeRetrieve);
+  rvOverlay.addEventListener('click', function(e){ if (e.target === this) closeRetrieve(); });
   document.addEventListener('click', function(){
-    retrievePop.classList.remove('show');
-    retrieveBtn.setAttribute('aria-expanded', 'false');
     closeAddMenu();
     toggleBotMenu(false);
   });
 
-  function parseRetrieve(){
-    var v = ($('#retrieveInput').value || '').trim();
-    var hint = $('#retrieveHint');
-    hint.classList.remove('bad');
-    if (!v){
-      hint.classList.add('bad');
-      hint.textContent = '请先粘贴群里的取回链接，或链接 t= 后面那段载荷。';
-      return;
-    }
-    if (!/^https?:\/\/127\.0\.0\.1:\d+\/dl\?t=.+/.test(v) && !/^[A-Za-z0-9_-]{24,}$/.test(v)){
-      hint.classList.add('bad');
-      hint.textContent = '这不像青鸟的取回链接：应形如 http://127.0.0.1:9876/dl?t=… ，或直接是 t= 后面那段载荷。';
-      return;
-    }
-    hint.textContent = '链接有效，已开始下载，进度会出现在下方记录里。';
-    /* 生成一条接收记录 */
+  /* 取回页不显示进度、也不逐步汇报阶段：进度只活在消息记录里。
+     取回页只需要两件事 —— 开始下载；取消后回到可下载的样子。 */
+  function rvBegin(card){
+    runTransfer(card, rvFile, 'in', {
+      done: function(){ rvLock(false); },       /* 下完了，地址栏可以再用 */
+      stop: function(){ rvStage('pending'); rvLock(false); },
+      retry: function(){ rvRestart(card); }
+    });
+  }
+  function rvRestart(card){
+    card.classList.remove('fail', 'done');
+    var x = $('.fc-cancel', card);
+    if (x) x.style.display = '';
+    $('.bacts', card).innerHTML = '<button data-cancel>取消</button>';
+    $('.fmeta', card).innerHTML = '<span>' + fmtSize(rvFile.size) + '</span>' +
+      '<span class="live" data-rate>正在连接取回链接…</span><span data-pct>0%</span>';
+    $('.fc-bar i', card).style.width = '0%';
+    $('.fc-bar', card).setAttribute('aria-valuenow', '0');
+    $('[data-st]', card).textContent = '完成后直接存到「下载」目录';
+    rvStage('started');
+    rvLock(true);
+    rvBegin(card);
+    refreshStats();
+  }
+  $('#rvStart').addEventListener('click', function(){
+    clearInterval(rvTtlTimer);
+    rvLock(true);
+    /* 历史里这条记录才是任务的宿主；取回页点完就还回窗口 */
     var art = newMsg('msg-recv-' + (++sentSeq), 'in');
     art.innerHTML =
       '<div class="av person" aria-hidden="true">付</div>' +
-      '<div class="col"><div class="stack"><div class="who"><b>付新峰</b>' +
+      '<div class="col"><div class="stack"><div class="who"><b>' + esc(rvFile.from) + '</b>' +
       '<span class="dir in">接收</span><span class="time">' + clock() + '</span></div>' +
-      fileCardHtml('项目周会纪要-0916.docx', '128 KB', 'in') +
+      fileCardHtml(rvFile.name, fmtSize(rvFile.size), 'in') +
       '</div>' + msgActs(['remove']) + '</div>';
     $('#stream').appendChild(art);
     var card = $('.filecard', art);
-    runTransfer(card, { name:'项目周会纪要-0916.docx', size: 128 * 1024 }, 'in');
-    card.onclick = null;
+    card.setAttribute('data-od-id', 'recv-' + sentSeq);
     refreshStats();
-    scrollToEnd();
-    $('#retrieveInput').value = '';
-    retrievePop.classList.remove('show');
-    retrieveBtn.setAttribute('aria-expanded', 'false');
-    toast('已开始下载', '取回链接有效');
-  }
-  $('#retrieveGo').addEventListener('click', parseRetrieve);
-  $('#retrieveInput').addEventListener('keydown', function(e){ if (e.key === 'Enter') parseRetrieve(); });
+    rvBegin(card);
+    scrollToEnd();                     /* 关掉弹窗时，这条记录就在历史最下面 */
+    rvStage('started');
+    closeRetrieve();
+    toast('已开始下载', '进度在消息记录里');
+  });
 
   /* 权限体检卡：把「缺哪一项」明确说出来，再给一条去申请的路 */
   $('#permApply').addEventListener('click', function(){
@@ -3268,9 +3558,7 @@
   document.addEventListener('keydown', function(e){
     if (e.key !== 'Escape') return;
     if (expand.classList.contains('show')){ closeExpand(); return; }
-    if (retrievePop.classList.contains('show')){
-      retrievePop.classList.remove('show'); retrieveBtn.setAttribute('aria-expanded','false'); return;
-    }
+    if (rvOverlay.classList.contains('show')){ closeRetrieve(); return; }
     closeAddMenu();
     $$('.overlay').forEach(function(o){ o.classList.remove('show'); });
   });
