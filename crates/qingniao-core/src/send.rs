@@ -305,7 +305,7 @@ fn payload_summary(payload: &Value) -> String {
     }
 }
 
-fn iso8601_now(now_secs: u64) -> String {
+pub fn iso8601_now(now_secs: u64) -> String {
     // 与 APP nowIso() 同为 UTC ISO8601；core 无 chrono 依赖，手写格式化
     let days_since_epoch = now_secs / 86400;
     let secs_of_day = now_secs % 86400;
