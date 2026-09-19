@@ -199,8 +199,6 @@ pub struct UploadAccepted {
 pub struct SendOutcome {
     /// 取回链接（已写入卡片并发到群）
     pub link: String,
-    /// M0c 告警：本机接收服务未运行（不构成失败）
-    pub warning: Option<String>,
 }
 
 /// 一次待确认的下载（会话）
@@ -381,12 +379,9 @@ impl Engine {
         std::thread::Builder::new()
             .name(format!("qn-upload-{task_id}"))
             .spawn(move || match upload_inner(host.as_ref(), &quota, &task_id2, &cancel, &req, &key, &app_id, &app_secret, size) {
-                Ok((link, warning)) => {
+                Ok(link) => {
                     emit_progress(host.as_ref(), &task_id2, "out", "done", size, size, size, size, None, Some(&link), None);
-                    engine.record_final(&task_id2, serde_json::json!({
-                        "state":"done","dir":"out","link":link,
-                        "warning": warning,
-                    }));
+                    engine.record_final(&task_id2, serde_json::json!({"state":"done","dir":"out","link":link}));
                 }
                 Err(msg) => {
                     let state = if cancel.load(Ordering::Relaxed) { "cancelled" } else { "failed" };
@@ -427,7 +422,7 @@ impl Engine {
 
         let task_id = crypto::hex(&crypto::random_bytes(8));
         let cancel = Arc::new(AtomicBool::new(false));
-        let (link, warning) = upload_inner(
+        let link = upload_inner(
             self.host.as_ref(),
             &self.quota,
             &task_id,
@@ -438,7 +433,7 @@ impl Engine {
             &app_secret,
             size,
         )?;
-        Ok(SendOutcome { link, warning })
+        Ok(SendOutcome { link })
     }
 
     /// 取消任务（cooperative：在下一个片边界生效）
@@ -973,7 +968,7 @@ fn upload_inner(
     app_id: &str,
     app_secret: &str,
     total: u64,
-) -> Result<(String, Option<String>), String> {
+) -> Result<String, String> {
     let t0 = Instant::now();
     let client = FeishuClient::new(app_id, app_secret, quota.clone())?;
 
@@ -1041,9 +1036,8 @@ fn upload_inner(
     let payload = seal_payload(key, &env)?;
 
     // 5. 链接端口 = 配置端口（D23/M0c）：接收端据 configured_port 拨号，
-    //    与发送端本机服务的运行时状态无关；本机服务未运行只影响本机接收 → 告警不拒绝
+    //    与发送端本机服务的运行时状态无关；发送与接收完全解耦（2026-09-19 用户拍板：不告警不拒绝）
     let link = build_transfer_link(host.configured_port(), &payload);
-    let warning = service_unavailable_warning(host);
 
     // 6. 仅链接形式发群（D3/D4）；webhook 不计入月度额度
     let card = build_transfer_card(&display_name, total, &link, sent_ts);
@@ -1051,13 +1045,7 @@ fn upload_inner(
     if !(200..300).contains(&status) {
         return Err(format!("取回链接发送失败：HTTP {status} {body}"));
     }
-    Ok((link, warning))
-}
-
-/// M0c：本机接收服务不在运行 → 上传照常成功，但返回该告警（不作为 Err）
-fn service_unavailable_warning(host: &dyn Host) -> Option<String> {
-    (host.service_bound_port().is_none())
-        .then(|| "链接已生成，但本机当前无法接收对方回传的文件".to_string())
+    Ok(link)
 }
 
 /// 取回链接组装（D23：端口 = 配置值 configured_port，非本机运行时端口）
@@ -1198,15 +1186,12 @@ mod tests {
         assert_eq!(FixedHost::new(PathBuf::from("/tmp/qn-m0c")).configured_port(), DEFAULT_LOCAL_PORT);
     }
 
-    /// ② 服务未运行时上传路径返回告警而非 Err；运行中则无告警
+    /// ② （2026-09-19 用户拍板）服务未运行**不告警不拒绝**——发送与接收完全解耦。
+    /// 原「降为告警」设计随 M0c ②修订取消；本测试钉住「不告警」的口径。
     #[test]
-    fn m0c_service_down_yields_warning_not_error() {
+    fn m0c_service_down_does_not_warn() {
         let down = FixedHost::new(PathBuf::from("/tmp/qn-m0c")).with_service_port(None);
-        assert_eq!(
-            service_unavailable_warning(&down).as_deref(),
-            Some("链接已生成，但本机当前无法接收对方回传的文件")
-        );
-        let up = FixedHost::new(PathBuf::from("/tmp/qn-m0c")).with_service_port(Some(DEFAULT_LOCAL_PORT));
-        assert_eq!(service_unavailable_warning(&up), None);
+        // Host 的 service_bound_port 仅剩查询语义；无任何告警产生路径
+        assert_eq!(down.service_bound_port(), None);
     }
 }
