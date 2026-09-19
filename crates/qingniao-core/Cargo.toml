@@ -1,6 +1,6 @@
 [package]
 name = "qingniao-core"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 description = "青鸟共享核心：消息组装/识别/签名/配置 + 跨网传输（APP 与 CLI 共用，零 tauri 依赖）"
 
