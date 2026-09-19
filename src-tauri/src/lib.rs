@@ -348,20 +348,38 @@ fn load_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
 
 /// 保存配置（原子写入）
 #[tauri::command]
-fn save_config(app: tauri::AppHandle, config: AppConfig) -> Result<(), String> {
+fn save_config(app: tauri::AppHandle, config: serde_json::Value) -> Result<(), String> {
     let path = config_path(&app)?;
-    let data = serde_json::to_string_pretty(&config).map_err(|e| format!("配置序列化失败: {e}"))?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &data).map_err(|e| {
-        write_log(&app, LV_ERROR, &format!("save_config 写入临时文件失败: {e}"));
-        format!("写入配置失败: {e}")
+    // R8（M0b）：锁内「整体替换 raw + history 以磁盘为准」；文件锁/原子写/schema_version 由 core 处理。
+    // 前端快照不再拥有 history 的落盘权（D7 推完：删除走 delete_history_item、追加走 append_history_item）。
+    qingniao_core::config::replace_preserving_history(&path, config).map_err(|e| {
+        write_log(&app, LV_ERROR, &format!("save_config 失败: {e}"));
+        e
     })?;
-    std::fs::rename(tmp, &path).map_err(|e| {
-        write_log(&app, LV_ERROR, &format!("save_config 重命名失败: {e}"));
-        format!("保存配置失败: {e}")
-    })?;
-    write_log(&app, LV_INFO, &format!("save_config: 已保存 {} 个机器人 / {} 条历史", config.webhooks.len(), config.history.len()));
+    write_log(&app, LV_INFO, "save_config: 已保存（history 以磁盘为准保留）");
     Ok(())
+}
+
+/// R8（M0b）：删除单条历史（锁内按 time+kind 定位；前端只渲染不落盘）
+#[tauri::command]
+fn delete_history_item(app: tauri::AppHandle, time: String, kind: String) -> Result<usize, String> {
+    let path = config_path(&app)?;
+    let n = qingniao_core::config::delete_history_entry(&path, &time, &kind).map_err(|e| {
+        write_log(&app, LV_ERROR, &format!("delete_history_item 失败: {e}"));
+        e
+    })?;
+    write_log(&app, LV_INFO, &format!("delete_history_item: 删除 {n} 条"));
+    Ok(n)
+}
+
+/// R8（M0b）：追加单条历史（kind=file 传输记录的落盘路径；HISTORY_CAP 由 core 强制）
+#[tauri::command]
+fn append_history_item(app: tauri::AppHandle, rec: serde_json::Value) -> Result<(), String> {
+    let path = config_path(&app)?;
+    qingniao_core::config::append_history_item(&path, rec).map_err(|e| {
+        write_log(&app, LV_ERROR, &format!("append_history_item 失败: {e}"));
+        e
+    })
 }
 
 /// 读取本地图片文件并返回 base64（拖拽图片 → 输入框 chip 用）
@@ -1526,6 +1544,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_config,
             save_config,
+            delete_history_item,
+            append_history_item,
             send_webhook,
             upload_image,
             test_connection,

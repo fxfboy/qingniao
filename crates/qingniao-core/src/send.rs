@@ -27,6 +27,8 @@ pub enum SendErrorKind {
     Usage,
     /// 配置缺失/不可读（退出码 1）
     Config,
+    /// 资源被另一进程占用：配置锁 / 指纹锁（§5.4，退出码 2，可重试）
+    Busy,
     /// 网络错误（退出码 2）
     Network,
     /// 超时（退出码 2；消息可能已送达，历史记 unknown）

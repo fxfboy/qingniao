@@ -634,9 +634,12 @@ function renderStream(){
 }
 function addRecord(rec, persist = true){
   config.history.push(rec);
-  if(config.history.length > 100) config.history.shift();
+  // 100 条上限由 core 的 HISTORY_CAP 在落盘时强制（M0b），前端不再 shift
   // persist=false：记录已由 Rust core 落盘（消息发送，D7），此处只渲染
-  if (persist) saveConfig();
+  if (persist) {
+    if (invoke) invoke('append_history_item', { rec }).catch(e => console.error('历史追加失败', e));
+    else saveConfig(); // 非 Tauri 环境（原型预览）兜底
+  }
   // 增量插入
   const stream = $('#stream');
   const lastRec = config.history[config.history.length - 2];
@@ -673,9 +676,13 @@ $('#stream').addEventListener('click', async e => {
     const rec = art._rec;
     const act = actBtn.dataset.act;
     if (act === 'remove'){
+      // R8/M0b：删除走独立 IPC（锁内按 time+kind 定位），本地仅同步渲染
+      if (invoke && rec.time && rec.kind) {
+        invoke('delete_history_item', { time: rec.time, kind: rec.kind })
+          .catch(e => toast('删除失败: ' + e, '', 'err'));
+      }
       const idx = config.history.indexOf(rec);
       if (idx >= 0) config.history.splice(idx, 1);
-      saveConfig();
       art.remove();
       // 重绘日期分隔
       renderStream();
