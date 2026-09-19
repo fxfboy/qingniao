@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*"
+  # 手动重建既有 release 的产物（不发新版本、只更新最后一个 release 里的包）：
+  # 在 default 分支最新提交上构建，产物覆盖到指定 tag 的既有 release
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要更新产物的既有 release tag（如 v0.6.2，版本须与四源一致）"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -14,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,17 +30,20 @@ jobs:
       - name: 校验 tag 与四源版本一致（Cargo.toml 为单一来源，见方案 D14）
         id: version
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          # tag 推送时用 ref 名；手动触发时用输入（此时 checkout 的是 default 分支最新提交）
+          RELEASE_TAG="${{ inputs.tag || github.ref_name }}"
+          TAG_VERSION="${RELEASE_TAG#v}"
           CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
           TAURI_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' src-tauri/tauri.conf.json | head -1)
           NPM_VERSION=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -1)
-          echo "tag=${TAG_VERSION} cargo=${CARGO_VERSION} tauri=${TAURI_VERSION} npm=${NPM_VERSION}"
+          echo "tag=${RELEASE_TAG} cargo=${CARGO_VERSION} tauri=${TAURI_VERSION} npm=${NPM_VERSION}"
           fail() { echo "::error::$1"; exit 1; }
           [ -n "$CARGO_VERSION" ] || fail "无法从 src-tauri/Cargo.toml 读取版本"
           [ "$TAG_VERSION" = "$CARGO_VERSION" ] || fail "tag 版本(${TAG_VERSION})与 Cargo.toml 版本(${CARGO_VERSION})不一致，请先更新版本再打 tag"
           [ "$CARGO_VERSION" = "$TAURI_VERSION" ] || fail "Cargo.toml(${CARGO_VERSION})与 tauri.conf.json(${TAURI_VERSION})版本不一致"
           [ "$CARGO_VERSION" = "$NPM_VERSION" ] || fail "Cargo.toml(${CARGO_VERSION})与 package.json(${NPM_VERSION})版本不一致"
           echo "version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
 
   # 先创建 Draft Release，后续 macOS / Windows job 并行向同一 release 上传产物
   create-release:
@@ -45,7 +57,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" \
+          gh release view "${{ needs.check-version.outputs.tag }}" >/dev/null 2>&1 || gh release create "${{ needs.check-version.outputs.tag }}" \
             --draft \
             --title "青鸟 ${{ needs.check-version.outputs.version }}" \
             --notes "青鸟 · 飞书消息助手 — 向飞书自定义机器人发送文本 / 富文本 / 图片 / 消息卡片"
@@ -89,7 +101,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
+          tagName: ${{ needs.check-version.outputs.tag }}
           releaseName: "青鸟 ${{ needs.check-version.outputs.version }}"
           releaseBody: "青鸟 · 飞书消息助手 — 向飞书自定义机器人发送文本 / 富文本 / 图片 / 消息卡片"
           releaseDraft: true
@@ -117,7 +129,7 @@ jobs:
           cp target/aarch64-apple-darwin/release/qingniao-cli "$STAGE/qingniao"
           "$STAGE/qingniao" --version
           (cd "$STAGE" && zip -q "$GITHUB_WORKSPACE/qingniao-cli-${VERSION}-macos-arm64.zip" qingniao)
-          gh release upload "${{ github.ref_name }}" "qingniao-cli-${VERSION}-macos-arm64.zip" --clobber
+          gh release upload "${{ needs.check-version.outputs.tag }}" "qingniao-cli-${VERSION}-macos-arm64.zip" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -189,5 +201,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $v = "${{ needs.check-version.outputs.version }}"
-          gh release upload "${{ github.ref_name }}" "QingNiao_${v}_windows-x64.zip" --clobber
-          gh release upload "${{ github.ref_name }}" "qingniao-cli-${v}-windows-x64.zip" --clobber
+          gh release upload "${{ needs.check-version.outputs.tag }}" "QingNiao_${v}_windows-x64.zip" --clobber
+          gh release upload "${{ needs.check-version.outputs.tag }}" "qingniao-cli-${v}-windows-x64.zip" --clobber
