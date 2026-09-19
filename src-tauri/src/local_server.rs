@@ -493,3 +493,260 @@ mod tests {
         assert_eq!(html_escape("<b>&\"x\"</b>"), "&lt;b&gt;&amp;&quot;x&quot;&lt;/b&gt;");
     }
 }
+
+/* ===================== U17：wire contract 与退出竞态（P0-4，协议 §16） ===================== */
+//
+// 起真实 listener + 4 worker，从原始 TCP 断言状态码与语义。Engine 用注入的
+// `KeySource` / `ChunkStore`（M0a 出口 3 的接缝），不碰真实凭据库、不发外部网络请求。
+
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    use qingniao_core::transfer::crypto::{self, ChunkMeta, Envelope, Metadata};
+    use qingniao_core::transfer::engine::{ChunkStore, Engine, FixedHost, KeySource};
+    use sha2::{Digest, Sha256};
+    use std::collections::HashMap;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// 最小确认页模板：占位符被渲染后即可从 HTML 中提取 handle 与状态
+    const TEST_PAGE: &str = "<html data-state=\"{{STATE}}\" handle=\"{{HANDLE}}\" dir=\"{{DIR}}\"></html>";
+
+    struct FixedKeys;
+    impl KeySource for FixedKeys {
+        fn current(&self) -> Result<Option<String>, String> { Ok(Some("3c".repeat(32))) }
+        fn previous(&self) -> Result<Option<String>, String> { Ok(None) }
+    }
+
+    /// 首次 fetch 阻塞在门闩上：先 notify（证明已进入下载），再等测试放行——
+    /// 用于制造确定性的「下载中」窗口，验证并发 confirm 的 409。
+    struct GatedChunks {
+        sealed: Mutex<HashMap<String, Vec<u8>>>,
+        gate: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>,
+    }
+    impl ChunkStore for GatedChunks {
+        fn fetch(&self, token: &str) -> Result<Vec<u8>, String> {
+            if let Some((notify, release)) = self.gate.lock().unwrap().take() {
+                let _ = notify.send(());
+                let _ = release.recv();
+            }
+            Ok(self.sealed.lock().unwrap().get(token).cloned().expect("未知分片"))
+        }
+        fn delete(&self, _token: &str) -> Result<(), String> { Ok(()) }
+    }
+
+    fn key() -> Vec<u8> {
+        crypto::key_from_hex(&"3c".repeat(32)).expect("固定密钥")
+    }
+
+    /// 预占一个空闲端口（bind :0 后立刻释放；start 内重绑，极端情况靠重试兜底）
+    fn free_port() -> u16 {
+        let l = TcpListener::bind(("127.0.0.1", 0)).expect("bind :0");
+        let port = l.local_addr().unwrap().port();
+        drop(l);
+        port
+    }
+
+    fn http_raw(port: u16, req: &str) -> (u16, String) {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).expect("连接本地服务");
+        s.set_read_timeout(Some(Duration::from_secs(15))).expect("设读超时");
+        s.write_all(req.as_bytes()).expect("发送请求");
+        let mut buf = String::new();
+        let _ = s.read_to_string(&mut buf);
+        let status: u16 = buf
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        (status, buf)
+    }
+
+    fn body_of(resp: &str) -> &str {
+        resp.split("\r\n\r\n").nth(1).unwrap_or("")
+    }
+
+    fn handle_of(page_html: &str) -> String {
+        let key = "handle=\"";
+        let i = page_html.find(key).expect("页面必须含 handle 占位") + key.len();
+        let rest = &page_html[i..];
+        let j = rest.find('"').expect("handle 未闭合");
+        rest[..j].to_string()
+    }
+
+    fn get_dl(port: u16, payload: &str, host: &str) -> (u16, String) {
+        http_raw(
+            port,
+            &format!("GET /dl?t={payload} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"),
+        )
+    }
+
+    fn post_confirm(port: u16, handle: &str, origin: Option<&str>, referer: Option<&str>, ctype: &str) -> (u16, String) {
+        let body = format!("{{\"handle\":\"{handle}\"}}");
+        let mut req = format!("POST /dl/confirm HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n");
+        if let Some(o) = origin {
+            req.push_str(&format!("Origin: {o}\r\n"));
+        }
+        if let Some(r) = referer {
+            req.push_str(&format!("Referer: {r}\r\n"));
+        }
+        req.push_str(&format!(
+            "Content-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        http_raw(port, &req)
+    }
+
+    /// 一片信封：返回 (payload, 明文, token → 密文)
+    fn make_payload() -> (String, Vec<u8>, HashMap<String, Vec<u8>>) {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
+        use base64::Engine as _;
+        let dek: Vec<u8> = (0u8..32).map(|i| 0x10u8.wrapping_add(i)).collect();
+        let tid: Vec<u8> = (0u8..16).map(|i| 0x20u8.wrapping_add(i)).collect();
+        let nonce: Vec<u8> = (0u8..12).map(|i| 0x30u8.wrapping_add(i)).collect();
+        let plain: Vec<u8> = (0..32u32).map(|i| i as u8).collect();
+        let sealed = crypto::seal_chunk(&dek, &nonce, &tid, 0, &plain).expect("加密分片");
+        let env = Envelope {
+            v: crypto::PROTO_VERSION,
+            kid: crypto::fingerprint(&key()),
+            dek: B64URL.encode(&dek),
+            tid: crypto::hex(&tid),
+            meta: Metadata {
+                name: "u17.bin".into(),
+                mime: String::new(),
+                size: plain.len() as u64,
+                sha256: crypto::hex(&Sha256::digest(&plain)),
+                ts: crypto::now_unix(),
+                chunks: vec![ChunkMeta {
+                    t: "boxcnU17".into(),
+                    n: 0,
+                    off: 0,
+                    size: plain.len() as u64,
+                    nonce: B64URL.encode(&nonce),
+                }],
+            },
+        };
+        let payload = crypto::seal_payload(&key(), &env).expect("封装");
+        (payload, plain, HashMap::from([("boxcnU17".to_string(), sealed)]))
+    }
+
+    #[test]
+    fn u17_wire_contract_and_exit_gate() {
+        let tmp = std::env::temp_dir().join(format!("qn-u17-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("建临时目录");
+
+        let (payload, plain, sealed) = make_payload();
+        let scripted = Arc::new(GatedChunks {
+            sealed: Mutex::new(sealed),
+            gate: Mutex::new(None),
+        });
+        let engine = Arc::new(
+            Engine::open_with(
+                tmp.join("work"),
+                Arc::new(FixedHost::new(tmp.join("cfg"))
+                    .with_download_dir(tmp.join("dl").to_string_lossy().to_string())),
+                Arc::new(FixedKeys),
+                Some(scripted.clone() as Arc<dyn ChunkStore>),
+            )
+            .expect("构建 Engine"),
+        );
+        let cell = Arc::new(StatusCell::new(LocalServiceStatus::Stopped));
+        let svc = RealLocalService::new(cell, engine);
+
+        let mut port = None;
+        for _ in 0..10 {
+            let p = free_port();
+            if let LocalServiceStatus::Running { bound_port } = svc.start(p, TEST_PAGE) {
+                port = Some(bound_port);
+                break;
+            }
+        }
+        let port = port.expect("拿到可用端口");
+        let host = format!("127.0.0.1:{port}");
+        let expect = format!("http://127.0.0.1:{port}");
+
+        /* Host 校验：非 127.0.0.1:<port> → 403（防 DNS rebinding） */
+        let (st, resp) = get_dl(port, &payload, "evil.example:1");
+        assert_eq!(st, 403, "{resp}");
+        assert!(resp.contains("Host 不合法"));
+
+        /* 未知路由 → 404 */
+        let (st, _) = http_raw(port, &format!("GET /nope HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"));
+        assert_eq!(st, 404);
+
+        /* 缺载荷 → 410 */
+        let (st, _) = get_dl(port, "", &host);
+        assert_eq!(st, 410);
+
+        /* 正常 GET ×3：同一指纹三个一次性 handle */
+        let (st, r1) = get_dl(port, &payload, &host);
+        assert_eq!(st, 200, "{r1}");
+        assert!(r1.contains("data-state=\"pending\""), "{r1}");
+        let h1 = handle_of(&r1);
+        let (_, r2) = get_dl(port, &payload, &host);
+        let h2 = handle_of(&r2);
+        let (_, r3) = get_dl(port, &payload, &host);
+        let h3 = handle_of(&r3);
+        assert_ne!(h1, h2);
+        assert_ne!(h2, h3);
+
+        /* POST 校验顺序 ①：Origin/Referer 缺或跨 → 403，且不消耗 handle */
+        let (st, resp) = post_confirm(port, &h1, Some("http://evil.example"), None, "application/json");
+        assert_eq!(st, 403, "{resp}");
+        let (st, _) = post_confirm(port, &h1, None, Some("http://127.0.0.1:1/dl"), "application/json");
+        assert_eq!(st, 403);
+        let (st, _) = post_confirm(port, &h1, None, None, "application/json");
+        assert_eq!(st, 403, "无 Origin 且无 Referer 必须拒绝");
+
+        /* POST 校验顺序 ②：Content-Type 必须 application/json */
+        let (st, resp) = post_confirm(port, &h1, Some(&expect), None, "text/plain");
+        assert_eq!(st, 400, "{resp}");
+        assert!(resp.contains("application/json"));
+
+        /* 正确 confirm → 进入下载（阻塞在门闩） */
+        let (tx_notify, rx_notify) = mpsc::channel();
+        let (tx_release, rx_release) = mpsc::channel();
+        *scripted.gate.lock().unwrap() = Some((tx_notify, rx_release));
+        let expect_c = expect.clone();
+        let worker = std::thread::spawn(move || post_confirm(port, &h1, Some(&expect_c), None, "application/json"));
+        rx_notify
+            .recv_timeout(Duration::from_secs(5))
+            .expect("confirm 应已进入第 1 片下载");
+
+        /* 重复 handle 幂等（进行中）：同指纹第二个 handle → 409 */
+        let (st, resp) = post_confirm(port, &h2, Some(&expect), None, "application/json");
+        assert_eq!(st, 409, "{resp}");
+        assert!(resp.contains("正在下载"));
+
+        /* 放行 → 下载完成 → 200 + final_path */
+        let _ = tx_release.send(());
+        let (st, resp) = worker.join().expect("confirm 线程不应 panic");
+        assert_eq!(st, 200, "{resp}");
+        let v: serde_json::Value = serde_json::from_str(body_of(&resp)).expect("JSON 响应");
+        assert_eq!(v["code"], 0);
+        let final_path = v["final_path"].as_str().expect("应有 final_path");
+        assert_eq!(std::fs::read(final_path).expect("读回"), plain, "落盘内容必须一致");
+
+        /* 重复 handle 幂等（已完成）：第三个 handle → 200 replay */
+        let (st, resp) = post_confirm(port, &h3, Some(&expect), None, "application/json");
+        assert_eq!(st, 200, "{resp}");
+        let v: serde_json::Value = serde_json::from_str(body_of(&resp)).expect("JSON 响应");
+        assert_eq!(v["replay"], true, "已完成指纹必须幂等回放: {v}");
+
+        /* 退出门闩（对齐 A19）：stop_accepting 后新请求一律 503；恢复后正常 */
+        svc.stop_accepting();
+        let (st, resp) = get_dl(port, &payload, &host);
+        assert_eq!(st, 503, "{resp}");
+        assert!(resp.contains("服务停止中"));
+        svc.resume_accepting();
+        let (st, resp) = get_dl(port, &payload, &host);
+        assert_eq!(st, 200, "恢复准入后应正常响应: {resp}");
+        assert!(resp.contains("data-state=\"consumed\""), "已消费指纹应渲染「已下载过」页: {resp}");
+
+        /* 清理：join 全部 worker */
+        svc.stop();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
