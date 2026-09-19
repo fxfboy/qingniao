@@ -196,25 +196,6 @@
   .btn.sec:hover{background: var(--surface-soft); border-color: var(--border-strong)}
   .acts .tail{margin-left: auto; font-size: 11.5px; color: var(--muted-2)}
 
-  /* ==== 进度 ==== */
-  .bar{height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; margin-top: 18px}
-  .bar > i{display: block; height: 100%; border-radius: 3px; background: var(--down); width: 0; transition: width .3s ease-out}
-  @keyframes pulse{50%{opacity: .35}}
-  .steps{display: grid; gap: 2px; margin-top: 16px}
-  .step{display: flex; align-items: center; gap: 10px; padding: 8px 2px; font-size: 12.5px; color: var(--muted)}
-  .step .sico{
-    flex: none; width: 20px; height: 20px; border-radius: 50%;
-    display: grid; place-items: center;
-    border: 1.5px solid var(--border-strong); color: var(--muted-2);
-    font-family: var(--font-mono); font-size: 10px;
-  }
-  .step .sico svg{width: 11px; height: 11px}
-  .step.done{color: var(--fg)}
-  .step.done .sico{background: var(--ok); border-color: var(--ok); color: white}
-  .step.now{color: var(--fg); font-weight: 500}
-  .step.now .sico{border-color: var(--accent); color: var(--accent-ink); animation: pulse 1.2s ease-in-out infinite}
-  .step .tail{margin-left: auto; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-2); white-space: nowrap}
-
   /* ==== 落盘路径 ==== */
   .path{
     display: flex; align-items: center; gap: 9px;
@@ -239,16 +220,13 @@
   /* ==== 状态切换 ==== */
   .st{display: none}
   .st.on{display: block}
-  /* 不确定进度（确认请求期间） */
-  .bar > i.indeterminate{width: 34%; animation: slide 1.1s ease-in-out infinite alternate}
-  @keyframes slide{from{margin-left:0}to{margin-left:66%}}
 </style>
 </head>
 <body>
 
 <main class="card" id="card">
 
-  <header class="pagehead">
+  <header class="pagehead" data-od-id="page-header">
     <span class="mark" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M22 5.5c-1.2.5-2.4.9-3.7 1a5.4 5.4 0 0 0-9.4 4.8C4.9 11.1 2 9.4 0 6.7c-1 3 .1 6.4 2.8 8.2-.9 0-1.8-.3-2.6-.7 0 3 2.1 5.5 5 6.1-.9.2-1.8.3-2.6.1.7 2.4 3 4.2 5.7 4.3A11 11 0 0 1 0 27.5"/>
@@ -264,16 +242,17 @@
   <!-- ============ 待确认 ============ -->
   <section class="st on" id="st-pending" aria-labelledby="h-pending">
     <h1 id="h-pending">有一个文件等你取回</h1>
-    <p class="lede">这是从另一台机器发来的文件，全程采用端到端加密。</p>
+    <p class="lede">这是从另一台机器发过来的文件，只有你这台机器打得开。</p>
 
     <div class="file">
       <div class="fico" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>
       </div>
       <div class="finfo">
-        <b title="{{NAME}}">{{NAME}}</b>
+        <b title="项目周会纪要-0916.docx">项目周会纪要-0916.docx</b>
         <div class="meta">
-          <span>{{SIZE_HUMAN}}</span>
+          <span>1.2 MB</span>
+          <span>DOCX</span>
         </div>
       </div>
     </div>
@@ -281,15 +260,15 @@
     <div class="kv">
       <div class="row">
         <span class="k">发送时间</span>
-        <span class="v">{{SENT_TIME}}</span>
+        <span class="v">今天 16:02</span>
       </div>
       <div class="row">
         <span class="k">剩余有效期</span>
-        <span class="v hot mono" id="ttl">{{TTL_TEXT}}</span>
+        <span class="v hot mono" id="ttl">7:41</span>
       </div>
       <div class="row">
         <span class="k">保存到</span>
-        <span class="v mono">{{DIR}}</span>
+        <span class="v mono">/Users/fuxinfeng/Downloads</span>
       </div>
     </div>
 
@@ -307,51 +286,27 @@
     </div>
   </section>
 
-  <!-- ============ 下载中 ============ -->
-  <section class="st" id="st-running" aria-labelledby="h-running">
-    <h1 id="h-running">正在取回文件</h1>
-    <p class="lede">文件正在下载。这个页面关掉也不影响 —— 任务跑在青鸟里。</p>
-
-    <div class="bar" role="progressbar" aria-label="下载进度" id="dlBar"><i class="indeterminate"></i></div>
-    <p class="lede" style="margin-top:10px;font-size:12.5px" id="dlCap" aria-live="polite">下载中…</p>
-
-    <div class="note">
-      <span>完成后文件会直接保存到下载目录，重名会追加时间戳。</span>
-    </div>
-  </section>
-
-  <!-- ============ 完成 ============ -->
-  <section class="st" id="st-done" aria-labelledby="h-done">
-    <h1 id="h-done">文件已经到你机器上了</h1>
-    <p class="lede">文件完整性校验通过，内容与发送方完全一致。</p>
+  <!-- ============ 已开始：进度不在这页，回到青鸟看 ============ -->
+  <section class="st" id="st-started" aria-labelledby="h-started">
+    <h1 id="h-started">已开始下载</h1>
+    <p class="lede">进度在青鸟的消息记录里，这个页面可以关掉了。</p>
 
     <div class="path">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-      <code title="{{FINAL_PATH}}">{{FINAL_PATH}}</code>
-    </div>
-
-    <div class="kv">
-      <div class="row">
-        <span class="k">耗时</span>
-        <span class="v mono" id="elapsed">{{ELAPSED}}</span>
-      </div>
-    </div>
-
-    <div class="acts">
-      <span class="tail">这个页面可以关掉了</span>
+      <code title="/Users/fuxinfeng/Downloads/项目周会纪要-0916.docx">/Users/fuxinfeng/Downloads/项目周会纪要-0916.docx</code>
     </div>
   </section>
 
   <!-- ============ 410 链接已过期 ============ -->
   <section class="st" id="st-expired" aria-labelledby="h-expired">
     <h1 id="h-expired">链接已经过期</h1>
-    <p class="lede">这条链接的时间戳超出了 {{FRESH_WINDOW}} 的新鲜度窗口。青鸟不会再用它下载任何东西 —— 这道闸就是为了让被转发、被翻出来的旧链接彻底失效。</p>
+    <p class="lede">这条链接的时间戳超出了 10 分钟的新鲜度窗口。青鸟不会再用它下载任何东西 —— 这道闸就是为了让被转发、被翻出来的旧链接彻底失效。</p>
     <div class="kv">
-      <div class="row"><span class="k">新鲜度窗口</span><span class="v mono">{{FRESH_WINDOW}}</span></div>
+      <div class="row"><span class="k">新鲜度窗口</span><span class="v mono">10 分钟</span></div>
     </div>
     <div class="note warn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span>请让对方在青鸟里重新发一次这个文件。如果你确信链接是刚发的，检查一下本机时钟是否走偏了 {{FRESH_WINDOW}} 以上。</span>
+      <span>请让对方在青鸟里重新发一次这个文件。如果你确信链接是刚发的，检查一下本机时钟是否走偏了 10 分钟以上。</span>
     </div>
   </section>
 
@@ -371,23 +326,24 @@
     <p class="lede">这条链接之前已经用过了，文件已经在你机器上，不会重复下载。</p>
     <div class="path">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-      <code title="{{FINAL_PATH}}">{{FINAL_PATH}}</code>
+      <code title="/Users/fuxinfeng/Downloads/项目周会纪要-0916.docx">/Users/fuxinfeng/Downloads/项目周会纪要-0916.docx</code>
     </div>
     <div class="kv">
-      <div class="row"><span class="k">取回时间</span><span class="v">{{CONSUMED_AT}}</span></div>
+      <div class="row"><span class="k">取回时间</span><span class="v">今天 16:05</span></div>
     </div>
     <div class="acts">
+      <button class="btn sec" id="revealBtn2">在访达中显示</button>
       <span class="tail">文件不见了就请对方重发一次</span>
     </div>
   </section>
 
-  <!-- ============ 409 正在下载 ============ -->
+  <!-- ============ 409 同一个文件已经在下载了 ============ -->
   <section class="st" id="st-busy" aria-labelledby="h-busy">
     <h1 id="h-busy">同一个文件已经在下载了</h1>
     <p class="lede">这条链接对应的下载正在进行中。再点一次不会重复下载，同一个文件同时只会跑一个任务。</p>
     <div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <span>回到青鸟窗口的<b>消息记录</b>就能看到进度；下完会直接落到你的下载目录。</span>
+      <span>回到青鸟的<b>消息记录</b>里就能看到这条下载的进度；下完会直接落到你的下载目录。</span>
     </div>
   </section>
 
@@ -396,7 +352,8 @@
     <h1 id="h-origin">这次请求被拦下了</h1>
     <p class="lede">下载确认必须从这个确认页自己发出。刚才这一次的来源对不上，青鸟直接拒绝了 —— <b style="color:var(--fg);font-weight:500">没有下载任何东西，也没有删除任何东西</b>。</p>
     <div class="kv">
-      <div class="row"><span class="k">期望来源</span><span class="v mono">http://127.0.0.1:{{PORT}}</span></div>
+      <div class="row"><span class="k">期望来源</span><span class="v mono">http://127.0.0.1:9876</span></div>
+      <div class="row"><span class="k">实际来源</span><span class="v mono">缺失</span></div>
     </div>
     <div class="note warn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -418,102 +375,75 @@
   <section class="st" id="st-stopping" aria-labelledby="h-stopping">
     <h1 id="h-stopping">青鸟正在退出</h1>
     <p class="lede">本地服务已经停止接受新请求，正在把手头的传输收到安全点。此时开新任务会被中途打断，所以青鸟先挡住了。</p>
+    <div class="kv">
+      <div class="row"><span class="k">服务状态</span><span class="v mono">Stopping</span></div>
+    </div>
     <div class="note">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
       <span>如果你是误触了退出，在青鸟里取消退出即可，这个页面刷新一下就能继续。否则等青鸟下次启动后再点链接。</span>
     </div>
   </section>
 
-  <!-- ============ 通用错误 ============ -->
-  <section class="st" id="st-error" aria-labelledby="h-error">
-    <h1 id="h-error">出错了</h1>
-    <p class="lede" id="errorMsg">{{ERROR_MSG}}</p>
-    <div class="note warn">
-      <span>请回到青鸟查看详细日志，或请对方重新发送一次。</span>
-    </div>
-  </section>
-
 </main>
 
 <p class="pagefoot">
-  这个页面由青鸟在你本机上提供，地址 <code>127.0.0.1</code> 只有这台机器访问得到。文件全程采用端到端加密。
+  这个页面由青鸟在你本机上提供，地址 <code>127.0.0.1</code> 只有这台机器访问得到。文件内容从头到尾没有以明文形式离开过你的两台机器。
 </p>
 
 <script>
-  var QN = {
-    state: '{{STATE}}',
-    handle: '{{HANDLE}}',
-    port: '{{PORT}}',
-    ttl: {{TTL_SECS}}
-  };
-
-  var STATES = ['pending','running','done','expired','kid','consumed','busy','origin','gone','stopping','error'];
-  function show(name){
-    if (STATES.indexOf(name) < 0) name = 'error';
-    STATES.forEach(function(s){
-      var el = document.getElementById('st-' + s);
-      if (el) el.classList.toggle('on', s === name);
-    });
-  }
-  show(QN.state);
-  if (QN.state === 'error'){
-    var em = document.getElementById('errorMsg');
-    if (em) em.textContent = decodeURIComponent(QN.handle || '未知错误');
-  }
-
-  // ===== 主题：跟随系统 =====
+  // ===== 主题：跟随系统，并复用桌面端的偏好键 =====
   var mql = window.matchMedia('(prefers-color-scheme: dark)');
+  function readPref(){
+    try { return localStorage.getItem('qingniao-theme') || 'auto'; } catch(e){ return 'auto'; }
+  }
   function applyTheme(){
-    document.documentElement.dataset.theme = mql.matches ? 'dark' : 'light';
+    var pref = readPref();
+    document.documentElement.dataset.theme =
+      (pref === 'dark' || pref === 'light') ? pref : (mql.matches ? 'dark' : 'light');
   }
   applyTheme();
   mql.addEventListener('change', applyTheme);
 
+  // ===== 状态路由：hash 对应本地服务实际会渲染的响应 =====
+  var STATES = ['pending','started','expired','kid','consumed','busy','origin','gone','stopping'];
+  function show(name){
+    if (STATES.indexOf(name) < 0) name = 'pending';
+    STATES.forEach(function(s){
+      var el = document.getElementById('st-' + s);
+      if (el) el.classList.toggle('on', s === name);
+    });
+    document.title = (name === 'pending' ? '取回文件' : '取回文件 · ' + name) + ' · 青鸟';
+  }
+  function fromHash(){ show((location.hash || '').replace('#','')); }
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+
   // ===== 新鲜度倒计时：归零即进入过期态（D8） =====
   var ttlEl = document.getElementById('ttl');
-  if (ttlEl && QN.state === 'pending'){
-    var timer = setInterval(function(){
-      if (QN.ttl <= 0){ clearInterval(timer); show('expired'); return; }
-      QN.ttl--;
-      var m = Math.floor(QN.ttl / 60), s = QN.ttl % 60;
-      ttlEl.textContent = m + ':' + (s < 10 ? '0' : '') + s;
-    }, 1000);
+  var ttl = 7 * 60 + 41;
+  setInterval(function(){
+    if (ttl <= 0) return;
+    ttl--;
+    var m = Math.floor(ttl / 60), s = ttl % 60;
+    ttlEl.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+    if (ttl === 0 && document.getElementById('st-pending').classList.contains('on')) show('expired');
+  }, 1000);
+
+  // ===== 确认下载：POST /dl/confirm 之后只回一句「已开始」，
+  //       进度不在这页显示 —— 它在青鸟的消息记录里 =====
+  function startDownload(){
+    show('started');
   }
 
-  // ===== 确认下载：POST /dl/confirm（Origin 由浏览器自动带上，服务端校验）=====
-  var started = 0;
-  function startDownload(){
-    show('running');
-    started = Date.now();
-    fetch('/dl/confirm', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      credentials: 'omit',
-      body: JSON.stringify({handle: QN.handle})
-    }).then(function(r){
-      return r.json().then(function(j){ j.__status = r.status; return j; });
-    }).then(function(j){
-      if (j.code === 0){
-        var finalPath = document.querySelectorAll('#st-done code');
-        if (finalPath.length) finalPath[0].textContent = j.final_path || '';
-        var el = document.getElementById('elapsed');
-        if (el && started) el.textContent = ((Date.now() - started) / 1000).toFixed(1) + ' 秒';
-        show('done');
-      } else if (j.code === 409 || j.__status === 409){ show('busy');
-      } else if (j.code === 410001 || j.code === 410002 || j.__status === 410){ show('expired');
-      } else if (j.code === 404001){ show('gone');
-      } else if (j.__status === 403){ show('origin');
-      } else {
-        document.getElementById('errorMsg').textContent = j.msg || '下载失败';
-        show('error');
-      }
-    }).catch(function(){
-      document.getElementById('errorMsg').textContent = '无法连接青鸟本地服务（服务可能已退出）';
-      show('error');
+  document.getElementById('startBtn').addEventListener('click', startDownload);
+  [document.getElementById('revealBtn2')].forEach(function(b){
+    if (!b) return;
+    b.addEventListener('click', function(){
+      var old = b.textContent;
+      b.textContent = '已在访达中定位';
+      setTimeout(function(){ b.textContent = old; }, 1800);
     });
-  }
-  var startBtn = document.getElementById('startBtn');
-  if (startBtn) startBtn.addEventListener('click', startDownload);
+  });
 </script>
 </body>
 </html>
