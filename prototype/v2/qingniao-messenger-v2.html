@@ -878,24 +878,37 @@
   .pane .pane-title-row .pane-title-link:hover{color: var(--accent-ink); text-decoration:underline}
 
   .agent-card{border:1px solid var(--border); border-radius:12px; background: var(--surface); margin-bottom:14px; overflow:hidden}
-  .agent-card-head{display:grid; grid-template-columns: auto minmax(0,1fr) auto; gap:14px; align-items:center; padding: 14px 16px}
+  .agent-card-head{display:grid; grid-template-columns: auto minmax(0,1fr); gap:12px; align-items:flex-start; padding: 14px 16px 0}
   .agent-ico{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;background: var(--surface-soft); border:1px solid var(--border); color: var(--fg)}
   .agent-ico svg{width:18px;height:18px}
   .agent-ico.cli{background: oklch(0.24 0.02 240); color: oklch(0.85 0.09 155); border-color: transparent; font-family: var(--font-mono); font-weight:600; font-size:13px}
   .agent-ico.skill{background: var(--accent-soft); color: var(--accent-ink); border-color: transparent}
-  .agent-meta{min-width:0}
-  .agent-meta b{display:block; font-size:13.5px; font-weight:600; color: var(--fg)}
-  .agent-meta b code{font-family: var(--font-mono); font-size:12px; font-weight:500; padding:1px 5px; border-radius:4px; background: var(--surface-soft); color: var(--muted); margin-left:6px; border:1px solid var(--border)}
-  .agent-meta span{display:block; font-size:12px; color: var(--muted); margin-top:2px}
-  .agent-card-cta{display:flex; align-items:center; gap:10px; flex:none}
-  .agent-status{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; padding: 4px 9px; border-radius:999px; background: oklch(0.94 0.05 155); color: var(--ok); font-weight:500; flex:none}
-  .agent-status svg{width:12px;height:12px}
+  .agent-name{display:flex; align-items:center; flex-wrap:wrap; gap:7px; min-width:0}
+  .agent-name b{font-size:13.5px; font-weight:600; color: var(--fg)}
+  .agent-name code{font-family: var(--font-mono); font-size:11.5px; font-weight:500; padding:1px 6px; border-radius:4px; background: var(--surface-soft); color: var(--muted); border:1px solid var(--border); white-space:nowrap}
+  .agent-desc{display:block; font-size:12px; color: var(--muted); margin-top:4px; line-height:1.65}
+  .agent-desc code{font-family: var(--font-mono); font-size:11px; padding:0 4px; border-radius:4px; background: var(--surface-soft); color: var(--fg); white-space:nowrap}
+  .agent-body{padding: 0 16px 14px 68px}
+  .agent-paths{display:flex; align-items:flex-start; gap:14px; margin-top:11px; padding: 9px 12px; border:1px solid var(--border); border-radius:9px; background: var(--surface-soft)}
+  .agent-paths .plbl{flex:none; font-size:11px; color: var(--muted-2); line-height:1.85}
+  .agent-paths .pvals{flex:1 1 0; min-width:0; display:grid; gap:2px}
+  .agent-paths code{font-family: var(--font-mono); font-size:11.5px; color: var(--fg); background:none; border:none; padding:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  .agent-foot{display:flex; align-items:center; gap:12px; margin-top:10px}
+  .agent-foot .fnote{flex:1 1 0; min-width:0; font-size:11.5px; line-height:1.55; color: var(--muted-2)}
+  .agent-foot .facts{display:flex; gap:8px; flex:none}
+  .agent-status{display:inline-flex; align-items:center; gap:5px; font-size:11px; padding: 2.5px 8px; border-radius:999px; background: oklch(0.94 0.05 155); color: var(--ok); font-weight:500; flex:none}
+  .agent-status svg{width:11px;height:11px}
+  .agent-status.off{background: var(--surface-soft); color: var(--muted); border:1px solid var(--border)}
   .agent-btn{padding: 5px 12px; font-size:12.5px; border-radius:7px; border:1px solid var(--border); background: var(--surface); color: var(--muted); transition: color .1s ease, border-color .1s ease}
   .agent-btn:hover{color: var(--fg); border-color: var(--border-strong)}
   .agent-btn.primary{background: var(--accent-fill); color: white; border-color: var(--accent-fill); font-weight:500}
   .agent-btn.primary:hover{background: var(--accent-fill-hover); color:white; border-color: var(--accent-fill-hover)}
   .agent-card:not(.installed) .installed-only{display:none}
   .agent-card.installed .not-installed-only{display:none}
+  @media (max-width: 920px){
+    .agent-body{padding-left:16px}
+    .agent-foot{flex-wrap:wrap}
+  }
 
   .pref-section{margin-bottom:22px}
   .pref-section:last-child{margin-bottom:0}
@@ -1302,7 +1315,7 @@
   html[data-theme="dark"] .sc-issue code{background: oklch(0 0 0 / 0.3); border-color: oklch(0.46 0.1 75); color: oklch(0.94 0.12 75)}
   html[data-theme="dark"] .rv-ph.bad .rv-ph-ico{background: oklch(0.29 0.075 25); color: oklch(0.86 0.14 25)}
   html[data-theme="dark"] .rv-ph.bad b{color: oklch(0.88 0.13 25)}
-  html[data-theme="dark"] .agent-status{background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
+  html[data-theme="dark"] .agent-status:not(.off){background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
   html[data-theme="dark"] .bot-list-item .meta .tag.ok{background: oklch(0.3 0.055 155); color: oklch(0.88 0.1 155)}
   html[data-theme="dark"] .bot-list-item .meta .tag.warn{background: oklch(0.32 0.08 75); color: oklch(0.9 0.12 75)}
   html[data-theme="dark"] .bot-list-confirm{background: oklch(0.28 0.08 25); border-top-color: oklch(0.5 0.14 25)}
@@ -2230,40 +2243,71 @@
           <h3>Agent 集成</h3>
           <a class="pane-title-link" href="#" onclick="return false">CLI 与 SKILL.md 文档 ↗</a>
         </div>
-        <p class="desc">让 <b style="color:var(--fg);font-weight:500">AI Agent</b> 通过命令行调用青鸟发消息、上传图片、查看历史。</p>
-        <div class="agent-card installed" data-agent="cli">
+        <p class="desc">让 <b style="color:var(--fg);font-weight:500">AI Agent</b> 通过命令行调用青鸟发消息、上传图片、查看历史。CLI 与技能只写入本机用户目录，卸载不会碰其他文件。</p>
+        <div class="agent-card installed" data-agent="cli" data-od-id="agent-card-cli">
           <div class="agent-card-head">
-            <div class="agent-ico cli">&gt;_</div>
+            <div class="agent-ico cli" aria-hidden="true">&gt;_</div>
             <div class="agent-meta">
-              <b>青鸟 CLI <code>qingniao</code></b>
-              <span>在终端里发消息、上传图片、查看历史，支持 <code>--json</code> 结构化输出</span>
+              <div class="agent-name">
+                <b>青鸟 CLI</b>
+                <code>qingniao</code>
+                <span class="agent-status installed-only">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                  已安装 v1.2.0
+                </span>
+                <span class="agent-status off not-installed-only">未安装</span>
+              </div>
+              <span class="agent-desc">在终端里发消息、上传图片、查看历史，支持 <code>--json</code>。</span>
             </div>
-            <div class="agent-card-cta">
-              <span class="agent-status installed-only">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-                已安装 v1.2.0
-              </span>
-              <button class="agent-btn installed-only" data-action="uninstall-cli">卸载</button>
-              <button class="agent-btn primary not-installed-only" data-action="install-cli">安装</button>
+          </div>
+          <div class="agent-body">
+            <div class="agent-paths">
+              <span class="plbl">安装位置</span>
+              <div class="pvals"><code id="cliPath">/Users/fuxinfeng/.local/bin/qingniao</code></div>
+            </div>
+            <div class="agent-foot">
+              <span class="fnote" id="cliNote">符号链接指向 App 内置二进制，随 App 升级自动更新。</span>
+              <div class="facts">
+                <button class="agent-btn installed-only" data-action="reinstall-cli">重新安装</button>
+                <button class="agent-btn primary not-installed-only" data-action="install-cli">安装</button>
+              </div>
             </div>
           </div>
         </div>
-        <div class="agent-card installed" data-agent="skill">
+        <div class="agent-card installed" data-agent="skill" data-od-id="agent-card-skill">
           <div class="agent-card-head">
-            <div class="agent-ico skill">
+            <div class="agent-ico skill" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 7h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h5"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/><circle cx="12" cy="14" r="2"/></svg>
             </div>
             <div class="agent-meta">
-              <b>Agent 技能包 <code>SKILL.md</code></b>
-              <span>让 Claude / Codex / 豆包等 Agent 识别青鸟能力，一个 <code>send</code> 就能发出去</span>
+              <div class="agent-name">
+                <b>Agent 技能包</b>
+                <code>SKILL.md</code>
+                <span class="agent-status installed-only">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                  已安装 · 最新
+                </span>
+                <span class="agent-status off not-installed-only">未安装</span>
+              </div>
+              <span class="agent-desc">让 Claude / Codex / WorkBuddy 等 Agent 识别青鸟能力，一个 <code>send</code> 就能发出去。</span>
             </div>
-            <div class="agent-card-cta">
-              <span class="agent-status installed-only">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-                已安装
-              </span>
-              <button class="agent-btn installed-only" data-action="uninstall-skill">卸载</button>
-              <button class="agent-btn primary not-installed-only" data-action="install-skill">安装</button>
+          </div>
+          <div class="agent-body">
+            <div class="agent-paths">
+              <span class="plbl">安装到</span>
+              <div class="pvals" id="skillPaths">
+                <code>~/.agents/skills</code>
+                <code>~/.claude/skills</code>
+                <code>~/.codex/skills</code>
+              </div>
+            </div>
+            <div class="agent-foot">
+              <span class="fnote">托管同步 —— 卸载只删青鸟写入的文件，你自装的其他技能不受影响。</span>
+              <div class="facts">
+                <button class="agent-btn installed-only" data-action="resync-skill">重新同步</button>
+                <button class="agent-btn installed-only" data-action="uninstall-skill">卸载</button>
+                <button class="agent-btn primary not-installed-only" data-action="install-skill">安装</button>
+              </div>
             </div>
           </div>
         </div>
@@ -3501,12 +3545,29 @@
       $$('#configOverlay .pane').forEach(function(p){ p.classList.toggle('active', p.id === target); });
     });
   });
+  // 安装路径按当前平台渲染：unix 用 ~，Windows 用用户目录绝对路径（与 App 实际写入位置一致）
+  var IS_WIN = /win/i.test(navigator.userAgent);
+  $('#cliPath').textContent = IS_WIN
+    ? 'C:\\Users\\fuxinfeng\\AppData\\Local\\qingniao\\bin\\qingniao.exe'
+    : '/Users/fuxinfeng/.local/bin/qingniao';
+  $('#cliNote').textContent = IS_WIN
+    ? '复制到本地 bin 目录并已加入 PATH；App 升级后重新安装即可更新。'
+    : '符号链接指向 App 内置二进制，随 App 升级自动更新。';
+  $('#skillPaths').innerHTML = (IS_WIN
+    ? ['C:\\Users\\fuxinfeng\\.agents\\skills', 'C:\\Users\\fuxinfeng\\.claude\\skills', 'C:\\Users\\fuxinfeng\\.codex\\skills']
+    : ['~/.agents/skills', '~/.claude/skills', '~/.codex/skills']
+  ).map(function(d){ return '<code>' + d + '</code>'; }).join('');
+
   $$('#paneAgent .agent-card').forEach(function(card){
     card.addEventListener('click', function(e){
       var btn = e.target.closest('[data-action]');
       if (!btn) return;
-      if (btn.getAttribute('data-action').indexOf('install') === 0) card.classList.add('installed');
-      else card.classList.remove('installed');
+      var a = btn.getAttribute('data-action');
+      if (a === 'install-cli'){ card.classList.add('installed'); toast('青鸟 CLI 已安装'); }
+      else if (a === 'reinstall-cli'){ toast('青鸟 CLI 已重新安装'); }
+      else if (a === 'install-skill'){ card.classList.add('installed'); toast('技能包已安装到 3 个目录'); }
+      else if (a === 'resync-skill'){ toast('技能包已重新同步', '3 个目录均为最新'); }
+      else if (a === 'uninstall-skill'){ card.classList.remove('installed'); toast('技能包已卸载', '只删除青鸟写入的文件'); }
     });
   });
 
