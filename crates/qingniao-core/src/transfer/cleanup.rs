@@ -196,9 +196,10 @@ pub fn run_due(store: &dyn CleanupStore, work_dir: &Path, now: i64) -> CleanupRe
         }
     }
 
-    // 汇总一行（§5.5）
+    // 汇总一行（§5.4 ③：仅在「有动作」的轮次以 info 输出；空跑降为 debug——
+    // 60 s tick 下无条件 info 会让 APP 文件 logger（Info 级）一天多出 1440 行无用日志）
     let days = last_sweep.map(|t| (now - t).max(0) / 86_400);
-    log::info!(
+    let summary = format!(
         "清理: 定时删除 {}/{}，扫描删除 {}（失败 {}）（上次扫描 {}）",
         report.scheduled_flushed,
         due_total,
@@ -209,7 +210,25 @@ pub fn run_due(store: &dyn CleanupStore, work_dir: &Path, now: i64) -> CleanupRe
             None => "从未".to_string(),
         }
     );
+    if should_summarize(&report, due_total) {
+        log::info!("{}", summary);
+    } else {
+        log::debug!("{}", summary);
+    }
     report
+}
+
+/// 汇总行是否值得以 info 级输出（§5.4 ③取「仅在有动作时输出」选项）：
+/// 有到期条目被处理 / 认领了扫描 / 删除有成败 / 有异常说明，任一成立即出声；
+/// 「什么都没发生」的空跑轮次（60 s tick 的常态）不出声。
+fn should_summarize(r: &CleanupReport, due_total: usize) -> bool {
+    due_total > 0
+        || r.swept
+        || r.scheduled_flushed > 0
+        || r.flush_failed > 0
+        || r.orphan_deleted > 0
+        || r.orphan_failed > 0
+        || r.note.is_some()
 }
 
 /// 锁内认领到期的待删条目：读出 → 从文件移除 → 原子写回。无到期条目时不写盘。
@@ -732,6 +751,55 @@ mod tests {
         assert!(!r.swept);
         assert_eq!(r.scheduled_flushed + r.flush_failed + r.orphan_deleted + r.orphan_failed, 0);
         assert!(r.note.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /* ===== 汇总行静默判定（§5.4 ③） ===== */
+
+    #[test]
+    fn summarize_only_when_there_is_activity() {
+        let mut r = CleanupReport::default();
+        assert!(!should_summarize(&r, 0), "无动作的空跑轮次不得出声");
+        // 有到期条目（无论删成/删败）
+        assert!(should_summarize(&r, 1));
+        // 认领了扫描（哪怕零删除）
+        r.swept = true;
+        assert!(should_summarize(&r, 0));
+        r.swept = false;
+        // 删除有成败 / 有异常说明
+        r.orphan_deleted = 1;
+        assert!(should_summarize(&r, 0));
+        r.orphan_deleted = 0;
+        r.orphan_failed = 1;
+        assert!(should_summarize(&r, 0));
+        r.orphan_failed = 0;
+        r.note = Some("x".into());
+        assert!(should_summarize(&r, 0));
+        // 定时清理的成败字段同样算「有动作」（防御：due_total 口径变化时不静默）
+        r.note = None;
+        r.scheduled_flushed = 2;
+        assert!(should_summarize(&r, 0));
+        r.scheduled_flushed = 0;
+        r.flush_failed = 1;
+        assert!(should_summarize(&r, 0));
+    }
+
+    /// 端到端：门控内、无到期条目的一轮真实 run_due → 空跑，不出声
+    #[test]
+    fn idle_round_of_run_due_is_silent() {
+        let dir = temp_dir("idle-round");
+        let store = StubStore::new("root");
+        store.put("root", vec![entry("qtr", "青鸟传输", NOW, true)]);
+        store.put("qtr", vec![]);
+        // 预置「刚扫过」→ 本轮门控内、无到期条目、无 note
+        {
+            let mut prev = None;
+            claim_sweep(&dir.join(STATE_FILE), NOW, &mut prev).unwrap();
+        }
+        let r = run_due(&store, &dir, NOW);
+        assert!(!r.swept);
+        assert!(r.note.is_none());
+        assert!(!should_summarize(&r, 0), "空跑轮次不得以 info 出声");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
