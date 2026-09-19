@@ -26,6 +26,8 @@ DOC_MAP=(
   "Agent-CLI-方案|https://fglabtop.feishu.cn/docx/Z4MhdOvEpo8ppAxmQHpcKnVVnEg"
   "Agent-CLI-方案-review|https://fglabtop.feishu.cn/docx/JMNcd0JmKoz4rCxHpvqcWuapnkg"
   "文件传输功能设计文档|https://fglabtop.feishu.cn/docx/ACRedaZCio7uJAxfSLncSGG9nVc"
+  "CLI 文件传输方案|https://fglabtop.feishu.cn/docx/KCz2d3wrVoiKKtxZDy3cP9RGncg"
+  "CLI 文件传输方案-review|https://fglabtop.feishu.cn/docx/LFQzd3JBso3tXRxkNBvcJ1EhnGe"
   "dock-tray 常驻功能设计文档|https://fglabtop.feishu.cn/docx/L7skdmr8GoyL2Lx9Kt1c7Bk6n8b"
   "文件传输功能设计文档-review|https://fglabtop.feishu.cn/docx/WI3Pd1wJhocgM3xoyHRc3gVUndc"
   "测试用例清单|https://fglabtop.feishu.cn/docx/L4jFda9aho3Vm0xJKNWc67dhnMh"
