@@ -109,6 +109,8 @@ jobs:
           test -f "$EMBEDDED" || { echo "::error::CLI 未嵌入 .app 资源"; exit 1; }
           lipo -archs "$EMBEDDED" | grep -q arm64
           "$EMBEDDED" --version
+          # 技能源必须一起进 .app 资源，否则「配置 → Agent」里也是「未打包」
+          test -f "$APP_BUNDLE/Contents/Resources/skills/qingniao/SKILL.md" || { echo "::error::技能源未嵌入 .app 资源"; exit 1; }
           hdiutil detach "$MNT"
           # 独立分发包：安装时复制为 ~/.local/bin/qingniao（unsigned，见 D16）
           STAGE=$(mktemp -d)
@@ -153,13 +155,34 @@ jobs:
         shell: pwsh
         run: target\release\qingniao-cli.exe --version
 
-      - name: 打包为 zip（APP + CLI）
+      - name: 打包为 zip（APP + CLI + 技能源）
         shell: pwsh
         run: |
           $v = "${{ needs.check-version.outputs.version }}"
-          Compress-Archive -Path target\release\qingniao.exe, target\release\qingniao-cli.exe -DestinationPath "QingNiao_${v}_windows-x64.zip"
-          Compress-Archive -Path target\release\qingniao-cli.exe -DestinationPath "qingniao-cli-${v}-windows-x64.zip"
+          $stage = "stage\QingNiao_${v}_windows-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target\release\qingniao.exe $stage\
+          Copy-Item target\release\qingniao-cli.exe $stage\
+          # Windows 便携包用 --no-bundle 构建，tauri 不会把 resources 落到 exe 同级；
+          # 必须手动把 skills/ 放到 exe 旁，否则「配置 → Agent」里技能源缺失（无法安装技能）
+          New-Item -ItemType Directory -Force -Path "$stage\skills" | Out-Null
+          Copy-Item -Recurse "skills\*" "$stage\skills"
+          if (-not (Test-Path "$stage\skills\qingniao\SKILL.md")) { throw "技能源未打进暂存目录" }
+          # 用 ZipFile::CreateFromDirectory 保证 zip 根就是 $stage 的内容（exe 与 skills/ 同级）
+          $zip = Join-Path (Get-Location) "QingNiao_${v}_windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $stage).Path, $zip)
+          Compress-Archive -Path target\release\qingniao-cli.exe -DestinationPath "qingniao-cli-${v}-windows-x64.zip" -Force
           Get-Item *.zip | Select-Object Name, Length
+
+      - name: Smoke test 发布 zip（技能源必须与 exe 同级）
+        shell: pwsh
+        run: |
+          $v = "${{ needs.check-version.outputs.version }}"
+          Expand-Archive -Path "QingNiao_${v}_windows-x64.zip" -DestinationPath "verify"
+          if (-not (Test-Path "verify\qingniao.exe")) { throw "zip 内缺少 qingniao.exe" }
+          if (-not (Test-Path "verify\skills\qingniao\SKILL.md")) { throw "zip 内缺少 skills/qingniao/SKILL.md" }
+          .\verify\qingniao-cli.exe --version
 
       - name: 上传 zip 到 Release
         env:

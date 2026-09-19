@@ -1352,28 +1352,56 @@ async function refreshAgentStatus(){
   const cliBadge = $('#cliStatusBadge'), cliBtn = $('#cliInstallBtn'), cliHint = $('#cliHint');
   const skBadge = $('#skillStatusBadge'), skBtn = $('#skillInstallBtn'), skUn = $('#skillUninstallBtn'), skHint = $('#skillHint');
   if(!invoke){ [cliBtn, skBtn, skUn].forEach(b => { if (b) b.disabled = true; }); return; }
+
+  // CLI 与技能各自独立取状态：任何一项失败都不得连坐另一项，
+  // 否则两个徽标会永久停在初始的「检测中…」，安装按钮也会一直卡在 disabled。
   try{
-    const [cli, sk] = await Promise.all([invoke('cli_install_status'), invoke('skills_status')]);
+    const cli = await invoke('cli_install_status');
     if (cli.installed){ agentBadge(cliBadge, '已安装', 'ok'); cliBtn.textContent = '重新安装'; }
     else { agentBadge(cliBadge, cli.source_available ? '未安装' : '未打包', 'idle'); cliBtn.textContent = '安装'; }
     cliBtn.disabled = !cli.source_available;
     cliHint.textContent = cli.target_path
-      ? ('安装位置: ' + cli.target_path + (cli.installed ? '' : ' · 安装后需重开终端使 PATH 生效'))
+      ? ('安装位置: ' + cli.target_path + (cli.installed ? '' : (cli.manual_path_setup
+          ? ' · 安装后需手动把该目录加入 PATH'
+          : ' · 安装后需重开终端使 PATH 生效')))
       : '';
-    if (sk.state === 'up-to-date') agentBadge(skBadge, '已安装 · 最新', 'ok');
-    else if (sk.state === 'drift') agentBadge(skBadge, '有更新', 'warn');
-    else agentBadge(skBadge, '未安装', 'idle');
-    skBtn.textContent = sk.state === 'up-to-date' ? '重新同步' : sk.state === 'drift' ? '更新' : '安装技能';
-    skUn.disabled = sk.state === 'not-installed';
-    skHint.textContent = '安装到 ' + sk.targets.map(t => '~/' + t.label + '/skills').join('、');
-  }catch(e){ /* 状态读取失败静默，按钮保持当前态 */ }
+  }catch(e){
+    agentBadge(cliBadge, '检测失败', 'warn');
+    cliBtn.disabled = false;
+    cliHint.textContent = '状态读取失败：' + String((e && e.message) || e);
+  }
+
+  try{
+    const sk = await invoke('skills_status');
+    if (sk.state === 'source-missing'){
+      // 安装包未内置 skills/（如 Windows 便携包）：明示「未打包」而非报错
+      agentBadge(skBadge, '未打包', 'idle');
+      skBtn.textContent = '安装技能';
+      skBtn.disabled = true;
+      skHint.textContent = '当前安装包未内置技能源，请改用 npx skills add fxfboy/qingniao';
+    } else {
+      if (sk.state === 'up-to-date') agentBadge(skBadge, '已安装 · 最新', 'ok');
+      else if (sk.state === 'drift') agentBadge(skBadge, '有更新', 'warn');
+      else agentBadge(skBadge, '未安装', 'idle');
+      skBtn.textContent = sk.state === 'up-to-date' ? '重新同步' : sk.state === 'drift' ? '更新' : '安装技能';
+      skBtn.disabled = false;
+      skHint.textContent = '安装到 ' + sk.targets.map(t => '~/' + t.label + '/skills').join('、');
+    }
+    skUn.disabled = !sk.targets.some(t => t.installed);
+  }catch(e){
+    agentBadge(skBadge, '检测失败', 'warn');
+    skBtn.disabled = false;
+    skHint.textContent = '状态读取失败：' + String((e && e.message) || e);
+  }
 }
 $('#cliInstallBtn')?.addEventListener('click', async () => {
   const b = $('#cliInstallBtn');
   b.disabled = true;
   try{
-    await invoke('install_cli');
-    toast('CLI 已安装', '重开终端后即可使用 qingniao 命令');
+    const st = await invoke('install_cli');
+    toast('CLI 已安装', st && st.manual_path_setup
+      ? ('还需手动把 ' + (st.target_dir || '安装目录') + ' 加入 PATH，之后新开终端即可使用 qingniao 命令')
+      : '重开终端后即可使用 qingniao 命令');
   }catch(e){ toast('CLI 安装失败', String(e && e.message || e), 'err'); }
   refreshAgentStatus();
 });
@@ -1760,11 +1788,16 @@ async function init(){
   updateBotPicker();
   renderStream();
   refresh();
-  // 动态填充关于页版本号
+  // 动态填充关于页版本号与数据目录（数据目录各平台不同，由 Rust 侧按平台缩写）
   try {
     const ver = await TAURI.app.getVersion();
     const el = document.getElementById('aboutVersion');
     if(el && ver) el.textContent = 'v' + ver;
+  } catch(e) {}
+  try {
+    const dir = await invoke('app_data_dir');
+    const el = document.getElementById('aboutDataDir');
+    if(el && dir) el.textContent = dir;
   } catch(e) {}
   log('info', '前端初始化完成 · history=' + config.history.length);
 }

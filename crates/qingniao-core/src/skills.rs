@@ -96,9 +96,39 @@ pub struct TargetStatus {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SkillsStatus {
-    /// not-installed | up-to-date | drift
+    /// not-installed | up-to-date | drift | source-missing
     pub state: String,
+    /// 技能源（bundle 内 `skills/qingniao/`）是否可用；false 时 state 恒为 source-missing
+    pub source_available: bool,
     pub targets: Vec<TargetStatus>,
+}
+
+/// 技能源缺失（Windows 便携包等未内置 `skills/` 的场景）：
+/// 不返回 Err——否则 UI 无法区分「未打包」与「未安装」，只能停在「检测中…」。
+/// 各目标仍按磁盘实况报告 installed，卸载按钮据此可用。
+pub fn missing_source_status(targets: &[SkillTarget]) -> SkillsStatus {
+    let tstats = targets
+        .iter()
+        .map(|t| {
+            let skill_dir = t.dir.join(SKILL_NAME);
+            let installed = hash_skill_dir(&skill_dir)
+                .ok()
+                .flatten()
+                .map(|h| !h.is_empty())
+                .unwrap_or(false);
+            TargetStatus {
+                label: t.label.to_string(),
+                dir: t.dir.to_string_lossy().to_string(),
+                installed,
+                up_to_date: false,
+            }
+        })
+        .collect();
+    SkillsStatus {
+        state: "source-missing".to_string(),
+        source_available: false,
+        targets: tstats,
+    }
 }
 
 /// 三态判定（paseo 同语义）：任一目标未安装/不一致 → drift；全装且全一致 → up-to-date
@@ -134,6 +164,7 @@ pub fn get_status(source_dir: &Path, targets: &[SkillTarget]) -> Result<SkillsSt
     };
     Ok(SkillsStatus {
         state: state.to_string(),
+        source_available: true,
         targets: tstats,
     })
 }
@@ -358,6 +389,41 @@ mod tests {
         }
         let st = get_status(&src, &targets).unwrap();
         assert_eq!(st.state, "not-installed");
+    }
+
+    /// 源缺失（安装包没带 skills/）时不得返回 Err——否则 UI 只能停在「检测中…」；
+    /// 各目标仍按磁盘实况报告 installed，卸载按钮据此可用
+    #[test]
+    fn missing_source_reports_installed_truthfully() {
+        let home = std::env::temp_dir().join(format!("qn-skills-nosrc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let targets = default_targets(&home);
+
+        let st = missing_source_status(&targets);
+        assert_eq!(st.state, "source-missing");
+        assert!(!st.source_available);
+        assert!(st.targets.iter().all(|t| !t.installed));
+
+        // 用户此前装过技能：源缺失也应如实报 installed（否则卸载入口会消失）
+        write(&targets[0].dir.join(SKILL_NAME).join("SKILL.md"), "old\n");
+        let st = missing_source_status(&targets);
+        assert!(st.targets[0].installed);
+        assert!(!st.targets[1].installed);
+
+        // 空目录不算已安装
+        std::fs::create_dir_all(targets[2].dir.join(SKILL_NAME)).unwrap();
+        let st = missing_source_status(&targets);
+        assert!(!st.targets[2].installed);
+    }
+
+    /// 正常路径必须显式声明源可用，前端据此区分「未安装」与「未打包」
+    #[test]
+    fn get_status_marks_source_available() {
+        let src = source_fixture("srcavail");
+        let home = std::env::temp_dir().join(format!("qn-skills-srcavail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let st = get_status(&src, &default_targets(&home)).unwrap();
+        assert!(st.source_available);
     }
 
     #[test]

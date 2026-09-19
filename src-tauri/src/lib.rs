@@ -301,6 +301,41 @@ fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// 把 dir 的前缀替换成短标签（HOME → `~`、APPDATA → `%APPDATA%`）；前缀不匹配则原样返回
+fn abbrev_path(dir: &Path, prefix: Option<&Path>, label: &str) -> String {
+    if let Some(p) = prefix {
+        if let Ok(rel) = dir.strip_prefix(p) {
+            return if rel.as_os_str().is_empty() {
+                label.to_string()
+            } else {
+                PathBuf::from(label).join(rel).display().to_string()
+            };
+        }
+    }
+    dir.display().to_string()
+}
+
+/// 数据目录展示串：按平台缩写（macOS/Linux 用 `~`，Windows 用 `%APPDATA%`），
+/// 与「关于」面板的既有写法一致；前缀不匹配时退回真实绝对路径。
+fn data_dir_display(dir: &Path) -> String {
+    #[cfg(target_os = "windows")]
+    let (prefix, label) = (std::env::var_os("APPDATA").map(PathBuf::from), "%APPDATA%");
+    #[cfg(not(target_os = "windows"))]
+    let (prefix, label) = (std::env::var_os("HOME").map(PathBuf::from), "~");
+    abbrev_path(dir, prefix.as_deref(), label)
+}
+
+/// 「关于」面板的数据目录：取 APP 真实使用的 app_config_dir（各平台不同），
+/// 前端不再硬编码 macOS 路径
+#[tauri::command]
+fn app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("无法定位数据目录: {e}"))?;
+    Ok(data_dir_display(&dir))
+}
+
 /// 一次性迁移：新版配置目录改为 qingniao 后，若旧目录 com.qingniao.app 中
 /// 存在配置文件且新位置还没有，则拷贝过来（保留旧文件作为备份，不删除）。
 fn migrate_old_config(app: &tauri::AppHandle, new_path: &Path) -> Result<(), String> {
@@ -916,15 +951,31 @@ fn resend_payload(
 
 // ===== Agent-CLI M4：技能 / CLI 安装（完全模仿 paseo，方案 v3 §七 D13）=====
 
-/// bundle 技能源目录：打包环境取 resource_dir()/skills；开发环境回退仓库 skills/
-fn bundled_skills_dir(app: &tauri::AppHandle) -> PathBuf {
+/// bundle 技能源目录：按 资源目录 → 可执行文件同目录 → 仓库 skills/ 依次探测，
+/// 取第一个真实包含 `skills/qingniao/` 的候选；都不存在返回 None（不再盲回退到编译期路径）。
+///
+/// 三处候选各有用处：
+/// - 资源目录：macOS DMG 等打包安装后 `resources/skills`；
+/// - exe 同级：Windows 便携 zip（CI 用 `--no-bundle`，resources 不落盘，`skills/` 直接放在 exe 旁，
+///   且 Windows 上 `resource_dir()` 就等于 exe 目录）；
+/// - 仓库：开发期 `cargo tauri dev`，`CARGO_MANIFEST_DIR` 是编译期常量，仅当路径真的存在才采用。
+fn bundled_skills_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(rd) = app.path().resource_dir() {
-        let p = rd.join("skills");
-        if p.join(qingniao_core::skills::SKILL_NAME).is_dir() {
-            return p;
-        }
+        candidates.push(rd.join("skills"));
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("skills")
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from)) {
+        candidates.push(dir.join("skills"));
+    }
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("skills"));
+    pick_skills_dir(candidates)
+}
+
+/// 取第一个真实包含 `skills/<SKILL_NAME>/` 的候选目录
+fn pick_skills_dir(candidates: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    candidates
+        .into_iter()
+        .find(|p| p.join(qingniao_core::skills::SKILL_NAME).is_dir())
 }
 
 fn skill_targets() -> Vec<qingniao_core::skills::SkillTarget> {
@@ -935,14 +986,22 @@ fn skill_targets() -> Vec<qingniao_core::skills::SkillTarget> {
     qingniao_core::skills::default_targets(&home)
 }
 
+/// 技能源缺失时的统一提示（Windows 便携包 / 精简分发）
+const ERR_SKILLS_SOURCE_MISSING: &str =
+    "当前安装包未内置技能源（skills/）。请改用 npm 安装路径：npx skills add fxfboy/qingniao";
+
 #[tauri::command]
 fn skills_status(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
-    qingniao_core::skills::get_status(&bundled_skills_dir(&app), &skill_targets())
+    let targets = skill_targets();
+    match bundled_skills_dir(&app) {
+        Some(dir) => qingniao_core::skills::get_status(&dir, &targets),
+        None => Ok(qingniao_core::skills::missing_source_status(&targets)),
+    }
 }
 
 #[tauri::command]
 fn install_skills(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
-    let dir = bundled_skills_dir(&app);
+    let dir = bundled_skills_dir(&app).ok_or(ERR_SKILLS_SOURCE_MISSING)?;
     let targets = skill_targets();
     qingniao_core::skills::install(&dir, &targets)?;
     qingniao_core::skills::get_status(&dir, &targets)
@@ -952,7 +1011,10 @@ fn install_skills(app: tauri::AppHandle) -> Result<qingniao_core::skills::Skills
 fn uninstall_skills(app: tauri::AppHandle) -> Result<qingniao_core::skills::SkillsStatus, String> {
     let targets = skill_targets();
     qingniao_core::skills::uninstall(&targets)?;
-    qingniao_core::skills::get_status(&bundled_skills_dir(&app), &targets)
+    match bundled_skills_dir(&app) {
+        Some(dir) => qingniao_core::skills::get_status(&dir, &targets),
+        None => Ok(qingniao_core::skills::missing_source_status(&targets)),
+    }
 }
 
 /// CLI 二进制来源：打包环境 resources/bin；开发环境 current_exe 同目录（workspace target）
@@ -984,12 +1046,17 @@ fn cli_install_target() -> Option<PathBuf> {
 #[tauri::command]
 fn cli_install_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let target = cli_install_target();
+    let target_dir = target.as_ref().and_then(|p| p.parent().map(PathBuf::from));
     let source_available = cli_source_path(&app).is_some();
     let installed = target.as_ref().map(|p| p.exists()).unwrap_or(false);
     Ok(serde_json::json!({
         "installed": installed,
         "source_available": source_available,
         "target_path": target.map(|p| p.display().to_string()),
+        // PATH 要加的是目录而不是可执行文件本身
+        "target_dir": target_dir.map(|p| p.display().to_string()),
+        // Windows 不像 macOS/Linux 那样能改 shell rc，安装目录需用户手动加进 PATH（方案 §七）
+        "manual_path_setup": cfg!(target_os = "windows"),
     }))
 }
 
@@ -1564,6 +1631,7 @@ pub fn run() {
             uninstall_skills,
             cli_install_status,
             install_cli,
+            app_data_dir,
             key_status,
             key_generate,
             key_export,
@@ -1592,7 +1660,8 @@ pub fn run() {
                 std::thread::Builder::new()
                     .name("qn-skills-autoupdate".into())
                     .spawn(move || {
-                        let dir = bundled_skills_dir(&app_handle);
+                        // 源缺失（未内置 skills/ 的安装包）直接跳过，不必刷 WARN
+                        let Some(dir) = bundled_skills_dir(&app_handle) else { return };
                         let targets = skill_targets();
                         match qingniao_core::skills::auto_update(&dir, &targets) {
                             Ok(true) => log::info!("Agent 技能检测到漂移，已自动更新"),
@@ -1721,6 +1790,55 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod agent_install_tests {
+    use super::*;
+
+    fn tmp_skills(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("qn-agent-install-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 技能源探测：跳过缺失候选，取第一个真实含 skills/qingniao 的目录
+    #[test]
+    fn pick_skills_dir_skips_missing_candidates() {
+        let base = tmp_skills("pick");
+        let bogus = base.join("no-such-dir");
+        let blank = base.join("blank");
+        std::fs::create_dir_all(&blank).unwrap(); // 有 skills/ 但没有 skills/qingniao
+        std::fs::create_dir_all(blank.join("skills")).unwrap();
+        let real = base.join("portable").join("skills"); // 候选就是 skills/ 目录本身
+        std::fs::create_dir_all(real.join(qingniao_core::skills::SKILL_NAME)).unwrap();
+
+        assert_eq!(
+            pick_skills_dir(vec![bogus.clone(), real.clone()]),
+            Some(real),
+            "缺失候选必须被跳过（Windows 便携包场景）"
+        );
+        assert_eq!(
+            pick_skills_dir(vec![bogus, blank]),
+            None,
+            "没有候选命中 → None，交由 UI 显示未打包"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// 数据目录缩写：HOME/APPDATA 前缀换成短标签，不匹配则原样返回
+    #[test]
+    fn abbrev_path_shortens_known_prefix() {
+        let home = PathBuf::from("/home/one");
+        assert_eq!(
+            abbrev_path(&home.join("Library/Application Support/qingniao"), Some(&home), "~"),
+            "~/Library/Application Support/qingniao"
+        );
+        assert_eq!(abbrev_path(&home, Some(&home), "~"), "~");
+        assert_eq!(abbrev_path(&home.join("x"), None, "~"), "/home/one/x");
+        assert_eq!(abbrev_path(Path::new("/other/p"), Some(&home), "~"), "/other/p");
+    }
 }
 
 #[cfg(test)]
