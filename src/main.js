@@ -1265,7 +1265,7 @@ function renderBotList(){
         + '<button data-action="cancel-edit">取消</button>'
         + '<button class="primary" data-action="save-edit">保存修改</button></div></div>'
       + '<div class="bot-list-confirm">'
-        + '<span class="msg">确认删除 <b>'+esc(bot.name)+'</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>'
+        + '<span class="confirm-msg">确认删除 <b>'+esc(bot.name)+'</b>？此机器人将从青鸟移除，飞书群内的 Webhook 本身不受影响。</span>'
         + '<button data-action="cancel-delete">取消</button>'
         + '<button class="danger" data-action="confirm-delete">确认删除</button></div>';
     list.appendChild(item);
