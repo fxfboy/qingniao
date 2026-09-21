@@ -6,6 +6,8 @@
 
 一个跨平台桌面小工具：向**飞书自定义机器人（Webhook）**发送各种格式消息，并在两台机器之间**端到端加密**地互传文件。支持 macOS 与 Windows 10/11。
 
+<img width="3800" height="1884" alt="image" src="https://github.com/user-attachments/assets/b8cb0133-9806-4222-b337-4d552297f603" />
+
 ## 功能
 
 ### 消息
