@@ -27,6 +27,7 @@ DOC_MAP=(
   "Agent-CLI-方案-review|https://fglabtop.feishu.cn/docx/JMNcd0JmKoz4rCxHpvqcWuapnkg"
   "文件传输功能设计文档|https://fglabtop.feishu.cn/docx/ACRedaZCio7uJAxfSLncSGG9nVc"
   "文件传输云端清理方案|https://fglabtop.feishu.cn/docx/ZO27doZ06oRIzHxWeOoceX05nPg"
+  "文件传输云端清理方案-review|https://fglabtop.feishu.cn/docx/J1CKdvSsioCHlhxhKvZcUzEEnNh"
   "CLI 文件传输方案|https://fglabtop.feishu.cn/docx/KCz2d3wrVoiKKtxZDy3cP9RGncg"
   "CLI 文件传输方案-review|https://fglabtop.feishu.cn/docx/LFQzd3JBso3tXRxkNBvcJ1EhnGe"
   "dock-tray 常驻功能设计文档|https://fglabtop.feishu.cn/docx/L7skdmr8GoyL2Lx9Kt1c7Bk6n8b"
@@ -36,6 +37,8 @@ DOC_MAP=(
   "项目导航|https://fglabtop.feishu.cn/docx/XHmadlsv2oCzrfxfm6fckIKLnab"
   "架构图|https://fglabtop.feishu.cn/docx/P0kOdhpsloNsklxK9S9cVR0gnPe"
   "分片AAD协议偏差说明|https://fglabtop.feishu.cn/docx/CXrAdRVfJoMip5xtmhvcch3Rnaf"
+  "注释与README修复清单|https://fglabtop.feishu.cn/docx/BiMcdJh9poIFzYxGfZHcK0MhnCe"
+  "注释与README修复清单-review|https://fglabtop.feishu.cn/docx/ADP0d55HhohzHex0zQYcsVP8ncg"
 )
 
 # 检查 lark-cli
