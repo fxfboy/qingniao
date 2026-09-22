@@ -421,7 +421,9 @@ async function send(){
     if(!invoke) throw 'Tauri 环境不可用';
     // 组装 / 签名 / 发送 / 历史写入全部在 core（D7）；网络失败也会记录 failed/unknown
     const r = await invoke('send_message', {
-      botKey: null, msgType: ft, text, imageKeys: imgKeys,
+      // 显式指定界面选中的 bot（id，旧数据退回 name），
+      // 避免 core 的 last_bot_id（CLI 写入）与界面选择不一致导致发错目标/签名错(19021)
+      botKey: bot ? (bot.id || bot.name) : null, msgType: ft, text, imageKeys: imgKeys,
       title: title || null, summary: summary || null,
       extra: Object.keys(extra).length ? extra : null,
     });
@@ -695,8 +697,12 @@ $('#stream').addEventListener('click', async e => {
       if (rec.payload){
         try{
           if(!invoke) throw 'Tauri 环境不可用';
-          // 重发走 core：重签名 + 按 time 更新原历史条目（不追加）
-          const r = await invoke('resend_payload', {payload: rec.payload, botKey: null, recTime: rec.time});
+          // 重发走 core：重签名 + 按 time 更新原历史条目（不追加）。
+          // botKey 优先用记录的 bot_id，其次按记录的 bot 名找到现存的同名 bot 的 id，
+          // 都没有才退回默认 bot——保证重发回到原目标而不是当前默认
+          const resendBotKey = rec.bot_id
+            || ((config.webhooks.find(b => b.name === rec.bot) || {}).id ?? null);
+          const r = await invoke('resend_payload', {payload: rec.payload, botKey: resendBotKey, recTime: rec.time});
           rec.ok = r.ok; rec.status = r.status_line; rec.state = r.state;
           saveConfig(); renderStream();
           toast(r.ok ? '已重新发送' : '重新发送失败', r.status_line, r.ok ? '' : 'err');
@@ -1226,7 +1232,12 @@ function renderBotMenu(){
       + '<div class="binfo"><b>'+esc(bot.name)+'</b><span>'+esc(shortUrl)+'</span></div>'
       + '<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
     btn.addEventListener('click', () => {
-      config.last_webhook = idx; saveConfig();
+      const bot = config.webhooks[idx] || {};
+      config.last_webhook = idx;
+      // 同步 core 的默认 bot 解析（default_bot 优先读 last_bot_id）；
+      // 旧数据 bot 无 id 时删除该键，让 core 退回按 last_webhook 解析
+      if (bot.id) config.last_bot_id = bot.id; else delete config.last_bot_id;
+      saveConfig();
       renderBotMenu(); updateBotPicker(); toggleBotMenu(false);
     });
     botMenu.insertBefore(btn, divider);

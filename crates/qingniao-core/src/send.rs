@@ -116,11 +116,19 @@ fn feishu_msg_of(body: &Value) -> Option<String> {
         .map(String::from)
 }
 
-/// APP status 文案兼容：`HTTP {n}` / `200 OK` / `{code} {msg}`
+/// APP status 文案兼容：`HTTP {n}` / `200 OK` / `{code} {msg}`。
+/// 19021（签名校验失败）追加可操作提示——该错误与时间/密钥相关，原始英文信息无法定位。
 fn status_line_for(http_status: u16, body: &Value) -> String {
     match feishu_code_of(body) {
         Some(0) => "200 OK".to_string(),
-        Some(code) => format!("{code} {}", feishu_msg_of(body).unwrap_or_default()),
+        Some(code) => {
+            let line = format!("{code} {}", feishu_msg_of(body).unwrap_or_default());
+            if code == 19021 {
+                format!("{line}（签名校验失败：请核对该机器人的签名密钥与飞书后台是否一致，或本机时间是否准确）")
+            } else {
+                line
+            }
+        }
         None => format!("HTTP {http_status}"),
     }
 }
@@ -242,6 +250,7 @@ pub fn dispatch_send(
 ) -> Result<RecordedSend, SendFailure> {
     let attempt = send_prebuilt(cfg, bot_key, payload, allow_insecure_url, now_secs)?;
     let bot_name = attempt.bot.name.clone();
+    let bot_id = attempt.bot.id.clone();
     let result = attempt.result;
 
     let msg_type = payload
@@ -271,6 +280,7 @@ pub fn dispatch_send(
         "state": state,
         "payload": payload,
         "bot": bot_name,
+        "bot_id": bot_id,
     });
 
     Ok(RecordedSend {
@@ -460,7 +470,7 @@ mod tests {
     #[test]
     fn status_line_compat() {
         assert_eq!(status_line_for(200, &json!({"code":0,"msg":"success"})), "200 OK");
-        assert_eq!(status_line_for(200, &json!({"code":19021,"msg":"sign match error"})), "19021 sign match error");
+        assert_eq!(status_line_for(200, &json!({"code":19021,"msg":"sign match error"})), "19021 sign match error（签名校验失败：请核对该机器人的签名密钥与飞书后台是否一致，或本机时间是否准确）");
         assert_eq!(status_line_for(500, &Value::Null), "HTTP 500");
     }
 

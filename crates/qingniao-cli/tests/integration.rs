@@ -185,7 +185,7 @@ fn send_business_error_is_failed_and_exit_2() {
     let doc = read_config(&cfg_path);
     assert_eq!(doc["history"][0]["state"], "failed");
     assert_eq!(doc["history"][0]["ok"], false);
-    assert_eq!(doc["history"][0]["status"], "19021 sign match error");
+    assert_eq!(doc["history"][0]["status"], "19021 sign match error（签名校验失败：请核对该机器人的签名密钥与飞书后台是否一致，或本机时间是否准确）");
 }
 
 #[test]
