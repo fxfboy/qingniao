@@ -136,7 +136,7 @@ fn send_message_auto_detect_and_business_fail() {
         .unwrap();
     assert!(!out.ok, "飞书业务错误应为失败");
     assert_eq!(out.state, "failed");
-    assert_eq!(out.status_line, "19021 sign match error");
+    assert_eq!(out.status_line, "19021 sign match error（签名校验失败：请核对该机器人的签名密钥与飞书后台是否一致，或本机时间是否准确）");
     assert_eq!(out.error.as_deref(), None, "HTTP 层完成不算 impl 级错误");
     let doc = read_config(&cfg_path);
     assert_eq!(doc["history"][0]["kind"], "post", "auto 识别应在 core 内完成");
