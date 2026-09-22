@@ -59,7 +59,7 @@ window.addEventListener('unhandledrejection', e => {
 
 /* ===================== 状态 ===================== */
 let config = null;
-let hotkeyMode = 'mod';         // 'mod' | 'enter'
+let hotkeyMode = 'enter';       // 'enter' | 'mod'
 let pendingFile = null;         // 确认弹窗中的待发文件 {path, name, size}
 let liveTasks = new Map();      // task_id -> {record, el}
 let importFpOk = false;
@@ -100,7 +100,7 @@ async function loadConfig(){
     if(!h.kind) h.kind = 'post';
     if(!h.dir) h.dir = 'out';
   }
-  hotkeyMode = config.hotkey === 'enter' ? 'enter' : 'mod';
+  hotkeyMode = config.hotkey === 'mod' ? 'mod' : 'enter';
 }
 let saveTimer = null;
 function saveConfig(){
@@ -398,8 +398,6 @@ async function send(){
   const type = ft === 'auto' ? lastAnalysis.t : ft;
   if(type !== 'image' && !text.trim() && !chips.length){ toast('内容为空', '', 'err'); return; }
 
-  const title = el === expEd ? ($('#expandTitle').value.trim() || '') : '';
-
   // 记录用的图片元数据（与 imgKeys 同序）
   const keyed = chips.filter(c => c._imageKey);
   const thumbs = keyed.length ? await Promise.all(keyed.map(c => makeThumb(c._dataUrl))) : [];
@@ -422,7 +420,7 @@ async function send(){
     // 组装 / 签名 / 发送 / 历史写入全部在 core（D7）；网络失败也会记录 failed/unknown
     const r = await invoke('send_message', {
       botKey: null, msgType: ft, text, imageKeys: imgKeys,
-      title: title || null, summary: summary || null,
+      title: null, summary: summary || null,
       extra: Object.keys(extra).length ? extra : null,
     });
     const dt = Math.round(performance.now() - t0);
@@ -430,7 +428,8 @@ async function send(){
     addRecord(r.record, false);   // 历史已由 core 落盘，这里只做界面渲染
     el.innerHTML = '';
     syncEmpty(el); refresh();
-    if(el === expEd) $('#expandTitle').value = '';
+    // 放大态发送完成后自动收起，回到主输入框
+    if (expand.classList.contains('show')) closeExpand();
     toast(r.ok ? ('已发送到 ' + bot.name) : '发送失败', r.status_line, r.ok ? '' : 'err');
   }catch(e){
     const msg = typeof e === 'string' ? e : (e && e.message) || String(e);
@@ -1136,7 +1135,6 @@ function openExpand(){
   RANGES.delete(ed);   // 搬走后旧 range 偏移可能越界，插图片时走 append 兜底
   moveChildren(ed, expEd);
   syncEmpty(ed); syncEmpty(expEd);
-  $('#expandTitle').value = '';
   $('#expandFrom').textContent = hadContent
     ? '已带入输入框里的内容 · 收起时会带回去'
     : '输入框还是空的 · 收起时会带回去';
@@ -1777,6 +1775,17 @@ listenEvent('transfer://state', ev => {
 });
 
 /* ===================== 偏好 ===================== */
+// 输入区/放大编辑区右下角的快捷键提示，随 hotkeyMode 动态更新
+function updateHotkeyHints(){
+  const isMac = /Mac/i.test(navigator.platform || '');
+  const sendPart = hotkeyMode === 'enter'
+    ? '<kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行'
+    : '<kbd>' + (isMac ? '⌘' : 'Ctrl') + '</kbd> + <kbd>Enter</kbd> 发送 · <kbd>Enter</kbd> 换行';
+  const main = $('#kbdSendHint'), exp = $('#kbdSendHintExp'), bar = $('#kbdSendHintBar');
+  if (main) main.innerHTML = sendPart;
+  if (exp) exp.innerHTML = sendPart;
+  if (bar) bar.textContent = hotkeyMode === 'enter' ? '↵ 直接发送' : (isMac ? '⌘↵ 直接发送' : 'Ctrl+↵ 直接发送');
+}
 function initPrefControls(){
   // 智能识别默认
   $$('#segDetect button').forEach(b => {
@@ -1797,6 +1806,7 @@ function initPrefControls(){
       hotkeyMode = b.dataset.v;
       config.hotkey = hotkeyMode;
       saveConfig();
+      updateHotkeyHints();
     };
   });
   // 开关（提示音 / 粘贴自动插入）暂存于 config.prefs
@@ -1820,6 +1830,7 @@ async function init(){
   applyTheme(config.theme || 'auto');
   initThemeCards();
   initPrefControls();
+  updateHotkeyHints();
   renderBotMenu();
   updateBotPicker();
   renderStream();

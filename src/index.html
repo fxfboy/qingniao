@@ -110,7 +110,7 @@
               <span class="am-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-5"/><path d="M9.6 15.2L12 12.8l2.4 2.4"/></svg>
               </span>
-              <span class="am-tx"><b>本地文件</b></span>
+              <span class="am-tx"><b>文件</b></span>
             </button>
           </div>
         </div>
@@ -131,7 +131,7 @@
       </div>
       <div class="right">
         <span class="cnt" id="counter"></span>
-        <span class="kbd-send"><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+        <span class="kbd-send" id="kbdSendHint"><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
       </div>
     </div>
   </section>
@@ -162,18 +162,14 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
       </button>
       <div class="ebar-right">
-        <span class="etip">↵ 直接发送</span>
+        <span class="etip" id="kbdSendHintBar">↵ 直接发送</span>
         <button class="ebtn" id="expandClose" title="收起" aria-label="收起">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
         </button>
       </div>
     </div>
 
-    <div class="expand-head">
-      <input class="expand-title" id="expandTitle" placeholder="无标题" aria-label="标题" />
-    </div>
-
-    <div class="expand-ed is-empty" id="expandEd" role="textbox" aria-multiline="true" aria-label="消息内容"
+    <div class="expand-ed is-empty" id="expandEd" contenteditable="true" role="textbox" aria-multiline="true" aria-label="消息内容"
          data-ph="写点什么，或者把图片直接粘进来…" spellcheck="false"></div>
 
     <div class="expand-foot">
@@ -187,7 +183,7 @@
       <span style="font-size:11.5px;color:var(--muted)" id="expandFrom">来自输入框的内容 · 收起时会带回去</span>
       <div class="ef-hint">
         <span id="expandCount">0 字</span>
-        <span><kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+        <span id="kbdSendHintExp"><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
       </div>
       <button class="csend" id="expandSend" aria-disabled="true" title="发送 · ↵" aria-label="发送">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -655,7 +651,7 @@
           </div>
           <div class="pref-row">
             <div class="rlbl"><b>发送快捷键</b><span>控制按下什么组合会真的把消息送出去</span></div>
-            <div class="pref-seg" id="segHotkey" role="tablist"><button data-v="mod" class="active">⌘↵</button><button data-v="enter">Enter</button></div>
+            <div class="pref-seg" id="segHotkey" role="tablist"><button data-v="mod">⌘↵</button><button data-v="enter" class="active">Enter</button></div>
           </div>
           <div class="pref-row">
             <div class="rlbl"><b>发送成功提示音</b><span>结果提示出现时播放一次系统音效</span></div>
