@@ -139,7 +139,8 @@ fn send_success_writes_history_and_signs() {
         }),
     );
 
-    let mut args = send_args(None, true);
+    // 用 name 键显式指定 bot（与 APP 显式传 botKey 的路径一致）
+    let mut args = send_args(Some("mock".into()), true);
     args.allow_insecure_url = true;
     args.text = Some("hello".into());
     let out = cmd_send(&cfg_path, args).unwrap();
@@ -161,6 +162,7 @@ fn send_success_writes_history_and_signs() {
     assert_eq!(rec["ok"], true);
     assert_eq!(rec["kind"], "text");
     assert_eq!(rec["bot"], "mock");
+    assert_eq!(rec["bot_id"], "bot1", "按 name 键发送也应记录 bot 的稳定 id");
     assert!(rec["payload"].get("sign").is_none(), "历史 payload 不得含签名");
     assert_eq!(rec["text"], "hello");
     // APP 专属字段未被 CLI 保存清除（D5）
@@ -185,7 +187,7 @@ fn send_business_error_is_failed_and_exit_2() {
     let doc = read_config(&cfg_path);
     assert_eq!(doc["history"][0]["state"], "failed");
     assert_eq!(doc["history"][0]["ok"], false);
-    assert_eq!(doc["history"][0]["status"], "19021 sign match error");
+    assert_eq!(doc["history"][0]["status"], "19021 sign match error（签名校验失败：请核对该机器人的签名密钥与飞书后台是否一致，或本机时间是否准确）");
 }
 
 #[test]
