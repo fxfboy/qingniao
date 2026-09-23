@@ -74,6 +74,13 @@ function defaultConfig(){
     transfer: { configured_port: 9876, download_dir: null }
   };
 }
+// 生成机器人稳定 id（与 core add_bot 的 b-{8位hex} 同格式）；
+// 发送/重发/默认解析（last_bot_id）都依赖 id 精确匹配，不能只靠 name
+function genBotId(){
+  const a = new Uint8Array(4);
+  crypto.getRandomValues(a);
+  return 'b-' + [...a].map(x => x.toString(16).padStart(2, '0')).join('');
+}
 async function loadConfig(){
   if(invoke){
     try{ config = await invoke('load_config'); }
@@ -87,6 +94,9 @@ async function loadConfig(){
   }
   if(!config.webhooks) config.webhooks = [];
   if(!config.history) config.history = [];
+  // 旧数据 bot 补齐稳定 id（此前 APP 新增的 bot 无 id，重发与默认解析只能脆弱地按 name 匹配）
+  let idBackfilled = false;
+  for(const b of config.webhooks){ if(!b.id){ b.id = genBotId(); idBackfilled = true; } }
   if(config.last_webhook === undefined || config.last_webhook === null || config.last_webhook >= config.webhooks.length) config.last_webhook = 0;
   if(!config.last_type) config.last_type = 'auto';
   if(!config.app_id) config.app_id = '';
@@ -100,6 +110,7 @@ async function loadConfig(){
     if(!h.kind) h.kind = 'post';
     if(!h.dir) h.dir = 'out';
   }
+  if(idBackfilled) saveConfig();
   hotkeyMode = config.hotkey === 'enter' ? 'enter' : 'mod';
 }
 let saveTimer = null;
@@ -421,8 +432,8 @@ async function send(){
     if(!invoke) throw 'Tauri 环境不可用';
     // 组装 / 签名 / 发送 / 历史写入全部在 core（D7）；网络失败也会记录 failed/unknown
     const r = await invoke('send_message', {
-      // 显式指定界面选中的 bot（id，旧数据退回 name），
-      // 避免 core 的 last_bot_id（CLI 写入）与界面选择不一致导致发错目标/签名错(19021)
+      // 显式指定界面选中的 bot，避免 core 的 last_bot_id（CLI 写入）与界面选择不一致导致发错目标/签名错(19021)。
+      // bot 恒有稳定 id（loadConfig 回填 / 新增时生成），name 兜底仅为旧数据防御
       botKey: bot ? (bot.id || bot.name) : null, msgType: ft, text, imageKeys: imgKeys,
       title: title || null, summary: summary || null,
       extra: Object.keys(extra).length ? extra : null,
@@ -698,11 +709,12 @@ $('#stream').addEventListener('click', async e => {
         try{
           if(!invoke) throw 'Tauri 环境不可用';
           // 重发走 core：重签名 + 按 time 更新原历史条目（不追加）。
-          // botKey 优先用记录的 bot_id，其次按记录的 bot 名找到现存的同名 bot 的 id，
-          // 都没有才退回默认 bot——保证重发回到原目标而不是当前默认
-          const resendBotKey = rec.bot_id
-            || ((config.webhooks.find(b => b.name === rec.bot) || {}).id ?? null);
-          const r = await invoke('resend_payload', {payload: rec.payload, botKey: resendBotKey, recTime: rec.time});
+          // 目标只认原 bot：优先按记录的 bot_id 找（失效则回退按 bot 名找），
+          // 都找不到说明原目标已删除/改名——报错终止，绝不静默退到当前默认 bot
+          const target = (rec.bot_id && config.webhooks.find(b => b.id === rec.bot_id))
+            || config.webhooks.find(b => b.name === rec.bot);
+          if(!target) throw '原目标机器人已不存在或已改名，请重新选择发送目标';
+          const r = await invoke('resend_payload', {payload: rec.payload, botKey: target.id, recTime: rec.time});
           rec.ok = r.ok; rec.status = r.status_line; rec.state = r.state;
           saveConfig(); renderStream();
           toast(r.ok ? '已重新发送' : '重新发送失败', r.status_line, r.ok ? '' : 'err');
@@ -1301,7 +1313,10 @@ $('#botList').addEventListener('click', e => {
     setTimeout(() => item.querySelector('.bot-list-edit input')?.focus(), 0);
   } else if(action === 'save-edit'){
     const inputs = item.querySelectorAll('.bot-list-edit .edit-grid input');
-    config.webhooks[idx] = {name: inputs[0].value.trim() || '未命名', secret: inputs[1].value.trim(), url: inputs[2].value.trim()};
+    // Object.assign 原地更新，保留既有 id（重发链路按 id 精确匹配，整对象替换会抹掉它）
+    const cur = config.webhooks[idx] = config.webhooks[idx] || {};
+    if(!cur.id) cur.id = genBotId();
+    Object.assign(cur, {name: inputs[0].value.trim() || '未命名', secret: inputs[1].value.trim(), url: inputs[2].value.trim()});
     saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
   } else if(action === 'cancel-edit'){ item.classList.remove('editing'); }
   else if(action === 'delete'){
@@ -1323,7 +1338,7 @@ $('#addBotBtn').addEventListener('click', () => {
     setTimeout(() => { errEl.textContent = '签名密钥用于自动计算 sign，留空则不带签名'; errEl.style.color = ''; }, 3000);
     return;
   }
-  config.webhooks.push({name, secret, url});
+  config.webhooks.push({id: genBotId(), name, secret, url});
   saveConfig(); renderBotList(); renderBotMenu(); updateBotPicker();
   $('#addBotName').value = ''; $('#addBotSecret').value = ''; $('#addBotUrl').value = '';
 });
