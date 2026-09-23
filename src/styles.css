@@ -1117,7 +1117,7 @@
     border-radius: 10px;
     box-shadow: 0 12px 32px oklch(0.15 0.02 240 / 0.16);
     font-size: 12.5px; color: var(--fg);
-    z-index: 150;
+    z-index: 170;   /* 高于 .overlay(160)：设置页等浮层里的操作提示不能被遮罩 + 毛玻璃盖住 */
     opacity:0; pointer-events:none;
     transition: opacity .16s ease, transform .16s ease;
   }
@@ -1254,7 +1254,7 @@
   .rv-path code{flex:1 1 0; min-width:0; font-family: var(--font-mono); font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
 
   .dropzone{
-    position: fixed; inset: 0; z-index: 140;
+    position: fixed; inset: 0; z-index: 170;   /* 与 .toast 同层，同样要高于 .overlay(160) */
     display:none; align-items:center; justify-content:center;
     background: oklch(0.2 0.02 240 / 0.34);
     backdrop-filter: blur(6px);
