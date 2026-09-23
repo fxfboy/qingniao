@@ -1,6 +1,6 @@
 [package]
 name = "qingniao-cli"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "青鸟 CLI：向飞书自定义机器人发送文本/富文本/图片/卡片消息（与 APP 共用 qingniao-core）"
 
