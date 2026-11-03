@@ -567,13 +567,12 @@
                 <button class="agent-btn" data-key="generate" id="keyGenerateBtn">生成密钥</button>
                 <button class="agent-btn" data-key="export" hidden>导出配对</button>
                 <button class="agent-btn" data-key="import">导入</button>
-                <button class="agent-btn" data-key="rotate" hidden>轮换</button>
               </div>
             </div>
 
             <div class="key-slot key-slot-generate">
               <h5>生成本机主密钥</h5>
-              <p>首次使用时生成一把 256 位主密钥，存入本机系统凭据库。第二台机器通过「导入」完成配对。</p>
+              <p>首次使用时生成一把 256 位主密钥，存入本机系统凭据库。重新生成会替换当前密钥；此后新解析的链接只接受新密钥，请重新配对另一台机器。</p>
               <div class="action-row">
                 <button class="btn-primary" id="keyGenerateConfirm">生成密钥并存入凭据库</button>
               </div>
@@ -595,7 +594,7 @@
 
             <div class="key-slot key-slot-import">
               <h5>从另一台机器导入</h5>
-              <p>粘贴另一台机器「导出配对」里显示的那串密钥，青鸟会算出指纹给你和对面核对。</p>
+              <p>粘贴另一台机器「导出配对」里显示的那串密钥，青鸟会算出指纹给你和对面核对。导入会替换当前密钥；此后新解析的链接只接受导入的密钥。</p>
               <input type="text" id="keyImportInput" spellcheck="false" placeholder="64 位十六进制主密钥" />
               <div class="fp-match bad" id="keyImportFp" hidden>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
@@ -603,18 +602,6 @@
               </div>
               <div class="action-row" style="margin-top:12px">
                 <button class="btn-primary" id="keyImportConfirm" disabled>确认导入并覆盖本机密钥</button>
-              </div>
-            </div>
-
-            <div class="key-slot key-slot-rotate">
-              <h5>轮换主密钥</h5>
-              <p>换一把新密钥。旧密钥还会保留 <b style="color:var(--fg);font-weight:500">30 天</b>，这期间已经发出去的旧链接仍然能下载；过了 30 天旧链接全部失效。</p>
-              <div class="warn-note">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                <span>换完之后必须把新密钥重新导入另一台机器，否则两台机器之间就传不了了。</span>
-              </div>
-              <div class="action-row" style="margin-top:12px">
-                <button class="btn-danger" id="keyRotateConfirm">生成新密钥并保留旧密钥 30 天</button>
               </div>
             </div>
           </div>

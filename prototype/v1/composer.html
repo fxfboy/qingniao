@@ -1515,8 +1515,7 @@
   .key-head .kacts{display:flex; gap: 6px; flex:none}
   .key-slot{display:none; padding: 0 16px 16px 16px; border-top: 1px dashed var(--border); animation: slideDown .16s ease}
   .key-card[data-slot="export"] .key-slot-export,
-  .key-card[data-slot="import"] .key-slot-import,
-  .key-card[data-slot="rotate"] .key-slot-rotate{display:block}
+  .key-card[data-slot="import"] .key-slot-import{display:block}
   .key-slot h5{margin: 14px 0 6px; font-size: 12.5px; font-weight: 600}
   .key-slot p{margin: 0 0 10px; font-size: 12px; color: var(--muted); line-height: 1.65}
   .key-reveal{display:flex; align-items:center; gap: 8px}
@@ -2371,7 +2370,6 @@
               <div class="kacts">
                 <button class="agent-btn" data-key="export">导出配对</button>
                 <button class="agent-btn" data-key="import">导入</button>
-                <button class="agent-btn" data-key="rotate">轮换</button>
               </div>
             </div>
 
@@ -2399,18 +2397,6 @@
               </div>
               <div class="action-row" style="margin-top:12px">
                 <button class="btn-primary">确认导入并覆盖本机密钥</button>
-              </div>
-            </div>
-
-            <div class="key-slot key-slot-rotate">
-              <h5>轮换主密钥</h5>
-              <p>换一把新密钥。旧密钥还会保留 <b style="color:var(--fg);font-weight:500">30 天</b>，这期间已经发出去的旧链接仍然能下载；过了 30 天旧链接全部失效。</p>
-              <div class="warn-note">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                <span>换完之后必须把新密钥重新导入另一台机器，否则两台机器之间就传不了了。</span>
-              </div>
-              <div class="action-row" style="margin-top:12px">
-                <button class="btn-danger">生成新密钥并保留旧密钥 30 天</button>
               </div>
             </div>
           </div>
@@ -3303,7 +3289,7 @@
     if (svc) svc.textContent = '127.0.0.1:' + p + ' · 常驻后台';
   });
 
-  // 密钥卡：导出 / 导入 / 轮换
+  // 密钥卡：导出 / 导入
   const keyCard = document.getElementById('keyCard');
   const KEY_PLAIN = '7f3ac91e5b284d06a1c8e93f47d2b60518aa73cd9e4f1b82c057d6a3e9418fbc';
   const KEY_MASK  = '•••• •••• •••• •••• •••• •••• •••• ••••';

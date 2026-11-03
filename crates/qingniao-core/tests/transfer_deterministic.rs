@@ -1,7 +1,7 @@
 //! M0a 出口 2（确定性面）——重构前冻结的字节级基线。
 //!
 //! 与 `transfer_interop.rs` 的分工：那边管**密文**（跨版本互操作 + 加密逐字节），
-//! 这边管**纯函数与文案**（密钥选择、新鲜度边界、文件名净化、载荷提取、webhook 签名）。
+//! 这边管**纯函数与文案**（新鲜度边界、文件名净化、载荷提取、webhook 签名）。
 //!
 //! 期望值全部是**重构前的实测取值**，不是推导值——取错就失去冻结的意义。
 //! 变更这些期望值前先问：这是有意的行为变更吗？若是，须走协议/方案修订并说明原因。
@@ -26,28 +26,6 @@ fn webhook_sign_known_vector() {
         qingniao_core::message::hmac_sign("test-secret", "1700000000"),
         "transfer 的 webhook_sign 与 core 的 hmac_sign 语义已分叉"
     );
-}
-
-/* ===================== 密钥选择（§12.3 轮换） ===================== */
-
-#[test]
-fn select_key_three_states() {
-    let k1 = "11".repeat(32);
-    let k2 = "22".repeat(32);
-    let kid1 = c::fingerprint(&c::key_from_hex(&k1).expect("k1"));
-    let kid2 = c::fingerprint(&c::key_from_hex(&k2).expect("k2"));
-    assert_ne!(kid1, kid2, "两个测试密钥不应撞指纹");
-
-    // current 命中
-    assert_eq!(c::select_key(&kid1, &k1, Some(&k2)).as_deref(), Some(k1.as_str()));
-    // previous 命中（轮换过渡期：旧链路的 payload 仍可解）
-    assert_eq!(c::select_key(&kid2, &k1, Some(&k2)).as_deref(), Some(k2.as_str()));
-    // 都不命中
-    assert_eq!(c::select_key("deadbeefdeadbeef", &k1, Some(&k2)), None);
-    // 无 previous 且 current 不命中
-    assert_eq!(c::select_key(&kid2, &k1, None), None);
-    // 非法 current hex 不 panic
-    assert_eq!(c::select_key(&kid1, "not-hex", Some(&k2)), None);
 }
 
 /* ===================== 新鲜度窗口（D8） ===================== */

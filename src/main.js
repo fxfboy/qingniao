@@ -1703,13 +1703,13 @@ async function refreshKeyCard(){
     $('#keyFp').hidden = !has;
     if (has){
       $('#keyFp').textContent = '指纹 ' + st.fingerprint;
-      $('#keyStoreHint').textContent = (st.has_previous ? '存在过渡旧密钥 · ' : '') + '存于系统凭据库';
+      $('#keyStoreHint').textContent = '存于系统凭据库';
     } else {
       $('#keyStoreHint').textContent = '尚未生成或导入主密钥';
     }
     $('[data-key="export"]').hidden = !has;
-    $('[data-key="rotate"]').hidden = !has;
     $('#keyGenerateBtn').textContent = has ? '重新生成' : '生成密钥';
+    $('#keyGenerateConfirm').textContent = has ? '重新生成并替换当前密钥' : '生成密钥并存入凭据库';
   }catch(e){
     $('#keyStoreHint').textContent = '无法获取密钥状态';
   }
@@ -1782,15 +1782,6 @@ $('#keyImportConfirm').addEventListener('click', async () => {
     keyCard.setAttribute('data-slot','');
     refreshKeyCard();
   }catch(e){ toast('导入失败', String(e).slice(0,80), 'err'); }
-});
-$('#keyRotateConfirm').addEventListener('click', async () => {
-  if(!invoke) return;
-  try{
-    const st = await invoke('key_rotate');
-    toast('密钥已轮换', '新指纹 ' + st.fingerprint + ' · 旧密钥保留 30 天');
-    keyCard.setAttribute('data-slot','');
-    refreshKeyCard();
-  }catch(e){ toast('轮换失败', String(e).slice(0,80), 'err'); }
 });
 
 /* 服务状态事件（后端推送） */

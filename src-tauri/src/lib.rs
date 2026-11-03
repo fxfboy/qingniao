@@ -481,14 +481,12 @@ struct KeyStatus {
     has_key: bool,
     kid: String,
     fingerprint: String,
-    has_previous: bool,
 }
 
 /// 当前密钥状态（指纹/kid = SHA-256(K) 前 8 字节 hex，D19）
 #[tauri::command]
 fn key_status() -> Result<KeyStatus, String> {
     let cur = keyring_store::get_current()?;
-    let prev = keyring_store::get_previous()?;
     match cur {
         Some(hex_key) => {
             let key = transfer::crypto::key_from_hex(&hex_key)?;
@@ -496,19 +494,17 @@ fn key_status() -> Result<KeyStatus, String> {
                 kid: transfer::crypto::fingerprint(&key),
                 fingerprint: transfer::crypto::fingerprint(&key),
                 has_key: true,
-                has_previous: prev.is_some(),
             })
         }
         None => Ok(KeyStatus {
             has_key: false,
             kid: String::new(),
             fingerprint: String::new(),
-            has_previous: false,
         }),
     }
 }
 
-/// 生成本机主密钥并存入凭据库（覆盖旧密钥；配对页「生成」入口）
+/// 生成本机主密钥并替换当前主密钥；配对页「生成」入口。
 #[tauri::command]
 fn key_generate(app: tauri::AppHandle) -> Result<KeyStatus, String> {
     let hex_key = keyring_store::generate();
@@ -523,22 +519,11 @@ fn key_export() -> Result<String, String> {
     keyring_store::get_current()?.ok_or_else(|| "尚未配置主密钥".to_string())
 }
 
-/// 导入主密钥（hex 64 字符，覆盖本机；导入前前端已展示指纹供人工核对）
+/// 导入并替换当前主密钥（hex 64 字符；新解析链接只接受替换后的密钥）。
 #[tauri::command]
 fn key_import(hex: String) -> Result<KeyStatus, String> {
     let key = transfer::crypto::key_from_hex(&hex)?;
     keyring_store::import(&transfer::crypto::hex(&key))?;
-    key_status()
-}
-
-/// 轮换：生成新密钥，旧密钥降级为 previous 保留 30 天（§12.3）
-#[tauri::command]
-fn key_rotate() -> Result<KeyStatus, String> {
-    if keyring_store::get_current()?.is_none() {
-        return Err("尚未配置主密钥，无需轮换".into());
-    }
-    let hex_key = keyring_store::generate();
-    keyring_store::rotate(&hex_key)?;
     key_status()
 }
 
@@ -1677,7 +1662,6 @@ pub fn run() {
             key_generate,
             key_export,
             key_import,
-            key_rotate,
             transfer_start_upload,
             transfer_cancel,
             transfer_parse_payload,
