@@ -519,7 +519,6 @@ mod wire_tests {
     struct FixedKeys;
     impl KeySource for FixedKeys {
         fn current(&self) -> Result<Option<String>, String> { Ok(Some("3c".repeat(32))) }
-        fn previous(&self) -> Result<Option<String>, String> { Ok(None) }
     }
 
     /// 首次 fetch 阻塞在门闩上：先 notify（证明已进入下载），再等测试放行——

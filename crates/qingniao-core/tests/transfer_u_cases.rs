@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /* ===================== 固定向量（与 transfer_tamper 同源） ===================== */
 
@@ -29,19 +29,28 @@ fn tid() -> Vec<u8> {
 struct FixedKeys;
 impl KeySource for FixedKeys {
     fn current(&self) -> Result<Option<String>, String> { Ok(Some(crypto::hex(&key()))) }
-    fn previous(&self) -> Result<Option<String>, String> { Ok(None) }
+}
+
+struct MutableKeys(RwLock<String>);
+impl KeySource for MutableKeys {
+    fn current(&self) -> Result<Option<String>, String> {
+        Ok(Some(self.0.read().unwrap().clone()))
+    }
 }
 
 /// 无密钥来源（「尚未配置」分支）
 struct NoKeys;
 impl KeySource for NoKeys {
     fn current(&self) -> Result<Option<String>, String> { Ok(None) }
-    fn previous(&self) -> Result<Option<String>, String> { Ok(None) }
 }
 
 /// 构造信封：按真实分片规则切片（非末片 = CHUNK_SIZE，与 `validate_metadata` 的
 /// 自洽约束一致）；返回 (信封, [(token, 密文)])
 fn make_env(plain: &[u8], ts: i64) -> (Envelope, Vec<(String, Vec<u8>)>) {
+    make_env_with_key(plain, ts, &key())
+}
+
+fn make_env_with_key(plain: &[u8], ts: i64, master_key: &[u8]) -> (Envelope, Vec<(String, Vec<u8>)>) {
     let mut metas = Vec::new();
     let mut sealed_pairs = Vec::new();
     for (i, slice) in plain.chunks(crypto::CHUNK_SIZE).enumerate() {
@@ -59,7 +68,7 @@ fn make_env(plain: &[u8], ts: i64) -> (Envelope, Vec<(String, Vec<u8>)>) {
     }
     let env = Envelope {
         v: crypto::PROTO_VERSION,
-        kid: crypto::fingerprint(&key()),
+        kid: crypto::fingerprint(master_key),
         dek: B64URL.encode(dek()),
         tid: crypto::hex(&tid()),
         meta: Metadata {
@@ -134,6 +143,40 @@ fn engine_at(root: &PathBuf, download_dir: &str, store: Option<Arc<dyn ChunkStor
         store,
     )
     .expect("构建 Engine")
+}
+
+#[test]
+fn current_key_replacement_applies_to_new_evaluations_on_same_engine() {
+    let root = temp_root("current-key-switch");
+    let k1 = "3c".repeat(32);
+    let k2 = "4d".repeat(32);
+    let keys = Arc::new(MutableKeys(RwLock::new(k1.clone())));
+    let engine = Engine::open_with(
+        root.join("work"),
+        Arc::new(FixedHost::new(root.join("cfg"))),
+        keys.clone(),
+        None,
+    ).expect("构建 Engine");
+
+    let k1_bytes = crypto::key_from_hex(&k1).unwrap();
+    let (env1, _) = make_env_with_key(b"current key one", crypto::now_unix(), &k1_bytes);
+    let payload1 = crypto::seal_payload(&k1_bytes, &env1).unwrap();
+    engine.evaluate_payload(&payload1).expect("当前 K1 应通过");
+
+    *keys.0.write().unwrap() = k2.clone();
+    let err = engine.evaluate_payload(&payload1).unwrap_err();
+    assert!(err.contains("密钥不匹配"), "应保持密钥错误语义，实际错误：{err}");
+
+    let k2_bytes = crypto::key_from_hex(&k2).unwrap();
+    let (env2, _) = make_env_with_key(b"current key two", crypto::now_unix(), &k2_bytes);
+    let payload2 = crypto::seal_payload(&k2_bytes, &env2).unwrap();
+    let evaluated = engine.evaluate_payload(&payload2).expect("替换后的 K2 应通过");
+    assert_eq!(evaluated.key_hex, k2);
+
+    let (bad_kid_env, _) = make_env_with_key(b"kid mismatch", crypto::now_unix(), &k1_bytes);
+    let bad_kid_payload = crypto::seal_payload(&k2_bytes, &bad_kid_env).unwrap();
+    let err = engine.evaluate_payload(&bad_kid_payload).unwrap_err();
+    assert!(err.contains("kid 校验失败"), "解密成功但 kid 不一致应拒绝：{err}");
 }
 
 /* ===================== U7：重放旧链接（>10 min）→ ts 过期拒绝（D8） ===================== */

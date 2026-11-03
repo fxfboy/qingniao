@@ -112,7 +112,6 @@ impl Host for FixedHost {
 /// M3 的「keyring 抽 trait」在此接缝上正式化。
 pub trait KeySource: Send + Sync {
     fn current(&self) -> Result<Option<String>, String>;
-    fn previous(&self) -> Result<Option<String>, String>;
 }
 
 /// 生产实现：OS 凭据库（`keyring_store`，SERVICE `com.qingniao.transfer`）
@@ -120,7 +119,6 @@ pub struct KeyringKeys;
 
 impl KeySource for KeyringKeys {
     fn current(&self) -> Result<Option<String>, String> { keyring_store::get_current() }
-    fn previous(&self) -> Result<Option<String>, String> { keyring_store::get_previous() }
 }
 
 /* ===================== 分片云端存取（U13 可控失败点） ===================== */
@@ -274,7 +272,7 @@ pub struct PendingDownload {
     pub handle: String,
     pub fingerprint: String,
     pub env: Envelope,
-    /// 解密 payload 所用的密钥（hex）——创建会话时已选定
+    /// evaluate 时的当前主密钥（hex）；替换密钥不撤销已建会话，会话最长存活至 expires_at。
     pub key_hex: String,
     pub app_id: String,
     pub app_secret: String,
@@ -531,39 +529,25 @@ impl Engine {
         if payload.len() > 20 * 1024 {
             return Err("载荷超出 20 KB 上限".into());
         }
-        // 按 kid 选择 K：先试 current，再试 previous（§12.3；30 天保留期由 keyring 层强制）
-        let cur = self.keys.current()?;
-        let prev = self.keys.previous()?;
-        let mut last_err: Option<String> = None;
-        for hex_key in [cur.as_deref(), prev.as_deref()].into_iter().flatten() {
-            let key = crypto::key_from_hex(hex_key)?;
-            match open_payload(&key, &payload) {
-                Ok(env) => {
-                    if crypto::fingerprint(&key) != env.kid {
-                        return Err("payload 与密钥标识不一致（kid 校验失败）".into());
-                    }
-                    validate_metadata(&env.meta).map_err(|e| format!("载荷不合法：{e}"))?;
-                    if !crypto::is_fresh(env.meta.ts, crypto::now_unix()) {
-                        return Err(format!(
-                            "链接已过期（ts 新鲜度窗口 {} 分钟）",
-                            crypto::FRESHNESS_WINDOW_MINUTES
-                        ));
-                    }
-                    return Ok(Evaluated {
-                        fingerprint: crypto::payload_fingerprint(&payload),
-                        key_hex: hex_key.to_string(),
-                    });
-                }
-                Err(e) => last_err = Some(e),
-            }
+        let key_hex = self.keys.current()?.ok_or_else(|| {
+            "本机尚未配置传输密钥：请在配置 · 文件传输中生成或导入".to_string()
+        })?;
+        let key = crypto::key_from_hex(&key_hex)?;
+        let env = open_payload(&key, &payload)?;
+        if crypto::fingerprint(&key) != env.kid {
+            return Err("payload 与密钥标识不一致（kid 校验失败）".into());
         }
-        Err(last_err.unwrap_or_else(|| {
-            if cur.is_none() {
-                "本机尚未配置传输密钥：请在配置 · 文件传输中生成或导入".into()
-            } else {
-                "密钥不匹配：确认两端已配对同一 K，或链接来自已轮换旧密钥".into()
-            }
-        }))
+        validate_metadata(&env.meta).map_err(|e| format!("载荷不合法：{e}"))?;
+        if !crypto::is_fresh(env.meta.ts, crypto::now_unix()) {
+            return Err(format!(
+                "链接已过期（ts 新鲜度窗口 {} 分钟）",
+                crypto::FRESHNESS_WINDOW_MINUTES
+            ));
+        }
+        Ok(Evaluated {
+            fingerprint: crypto::payload_fingerprint(&payload),
+            key_hex,
+        })
     }
 
     /// 创建一次性确认会话（handle，仅内存，活到链接新鲜度窗口结束）

@@ -31,7 +31,6 @@ fn tid(seed: u8) -> Vec<u8> {
 struct FixedKeys;
 impl KeySource for FixedKeys {
     fn current(&self) -> Result<Option<String>, String> { Ok(Some(crypto::hex(&key()))) }
-    fn previous(&self) -> Result<Option<String>, String> { Ok(None) }
 }
 
 /// 脚本化分片：可控制 delete 失败集合（用于触发 pending_deletes 入队）

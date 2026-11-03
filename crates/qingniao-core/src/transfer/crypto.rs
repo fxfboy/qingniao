@@ -144,22 +144,6 @@ pub fn payload_fingerprint(payload_b64: &str) -> String {
     hex(&Sha256::digest(payload_b64.trim().as_bytes()))
 }
 
-/// 按 kid 选择密钥：current → previous（§12.3）
-/// `previous` 传 None 表示无旧密钥。
-pub fn select_key(kid: &str, current_hex: &str, previous_hex: Option<&str>) -> Option<String> {
-    let cur = key_from_hex(current_hex).ok()?;
-    if fingerprint(&cur) == kid {
-        return Some(current_hex.to_string());
-    }
-    if let Some(prev) = previous_hex {
-        let prev_key = key_from_hex(prev).ok()?;
-        if fingerprint(&prev_key) == kid {
-            return Some(prev.to_string());
-        }
-    }
-    None
-}
-
 /* ===================== 分片 ===================== */
 
 /// 分片 AAD = `"QN2:v1" ‖ tid ‖ n(u32 LE)`（绑定传输与片序，防替换/错序）
@@ -395,17 +379,6 @@ mod tests {
     fn payload_fingerprint_differs_by_input() {
         assert_ne!(payload_fingerprint("abc"), payload_fingerprint("abd"));
         assert_eq!(payload_fingerprint("abc"), payload_fingerprint("abc"));
-    }
-
-    #[test]
-    fn select_key_prefers_current_then_previous() {
-        let cur = random_bytes(32);
-        let prev = random_bytes(32);
-        let cur_hex = hex(&cur);
-        let prev_hex = hex(&prev);
-        assert_eq!(select_key(&fingerprint(&cur), &cur_hex, Some(&prev_hex)), Some(cur_hex.clone()));
-        assert_eq!(select_key(&fingerprint(&prev), &cur_hex, Some(&prev_hex)), Some(prev_hex.clone()));
-        assert_eq!(select_key("deadbeef", &cur_hex, Some(&prev_hex)), None);
     }
 
     #[test]
